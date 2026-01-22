@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/restaurant/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    
+    <!-- PWA Meta Tags -->
+    <meta name="theme-color" content="#0f172a" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Kitchen Compliance" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    
+    <!-- Description -->
+    <meta name="description" content="Kitchen Compliance - Restaurant Cooling Safety & Compliance System for Irish Kitchens" />
+    
+    <!-- Open Graph -->
+    <meta property="og:title" content="Kitchen Compliance" />
+    <meta property="og:description" content="Restaurant Cooling Safety & Compliance System" />
+    <meta property="og:type" content="website" />
+    
+    <!-- Prevent phone number detection -->
+    <meta name="format-detection" content="telephone=no" />
+    
+    <!-- Apple Touch Icon -->
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    
+    <title>Kitchen Compliance</title>
+    
+    <!-- Preconnect to Supabase -->
+    <link rel="preconnect" href="https://supabase.co" />
+    
+    <style>
+      /* Critical CSS for initial load */
+      html, body, #root {
+        height: 100%;
+        margin: 0;
+        padding: 0;
+        background-color: #020617;
+        color: #f8fafc;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+        overscroll-behavior: none;
+        touch-action: manipulation;
+        user-select: none;
+        -webkit-user-select: none;
+      }
+      
+      /* Loading screen */
+      .loading-screen {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        height: 100vh;
+        gap: 1rem;
+      }
+      
+      .loading-spinner {
+        width: 48px;
+        height: 48px;
+        border: 4px solid #334155;
+        border-top-color: #0ea5e9;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+      }
+      
+      @keyframes spin {
+        to { transform: rotate(360deg); }
+      }
+      
+      .loading-text {
+        color: #94a3b8;
+        font-size: 1rem;
+      }
+    </style>
+    <script type="module" crossorigin src="/restaurant/assets/index-Dsni6Z3W.js"></script>
+    <link rel="stylesheet" crossorigin href="/restaurant/assets/index-BZDwelJv.css">
+  </head>
+  <body>
+    <div id="root">
+      <!-- Loading screen shown while JS loads -->
+      <div class="loading-screen">
+        <div class="loading-spinner"></div>
+        <p class="loading-text">Loading Kitchen Compliance...</p>
+      </div>
+    </div>
+  </body>
+</html>
