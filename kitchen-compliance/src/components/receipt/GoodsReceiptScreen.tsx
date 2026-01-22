@@ -1,7 +1,7 @@
 import { useState, useRef } from 'react'
 import { 
   ArrowLeft, Camera, Upload, Scan, Package, Thermometer, 
-  User, Building2, Calendar, CheckCircle, X, Loader2,
+  User, Building2, CheckCircle, X, Loader2,
   Plus, Trash2, FileText, AlertTriangle
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -45,7 +45,7 @@ const INITIAL_RECEIPT: ReceiptData = {
 }
 
 export function GoodsReceiptScreen({ onBack }: GoodsReceiptScreenProps) {
-  const { staffMembers, settings } = useAppStore()
+  const { staffMembers } = useAppStore()
   const [receipt, setReceipt] = useState<ReceiptData>(INITIAL_RECEIPT)
   const [isScanning, setIsScanning] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)

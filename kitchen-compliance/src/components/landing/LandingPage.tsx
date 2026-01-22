@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { 
   Shield, Thermometer, Clock, CheckCircle, ArrowRight, 
-  Mic, ChefHat, AlertTriangle, Sparkles, Star,
+  Mic, ChefHat, AlertTriangle, Sparkles,
   FileCheck, BarChart3
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -9,10 +9,10 @@ import { SignUpModal } from './SignUpModal'
 import { SignInModal } from './SignInModal'
 
 interface LandingPageProps {
-  onSignIn: () => void
+  onSignIn?: () => void
 }
 
-export function LandingPage({ onSignIn }: LandingPageProps) {
+export function LandingPage({ onSignIn: _onSignIn }: LandingPageProps) {
   const [isSignUpOpen, setIsSignUpOpen] = useState(false)
   const [isSignInOpen, setIsSignInOpen] = useState(false)
   const [selectedTier, setSelectedTier] = useState<'tier1' | 'tier2' | 'tier3'>('tier2')

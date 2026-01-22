@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ArrowRight, ArrowLeft, CheckCircle, Building2, Users, MapPin, Calendar, Loader2 } from 'lucide-react'
+import { ArrowRight, ArrowLeft, CheckCircle, Building2, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { supabase } from '@/lib/supabase'
 import { toast } from 'sonner'
@@ -102,8 +102,8 @@ export function OnboardingQuestionnaire({ userId, userEmail, onComplete }: Onboa
 
       console.log('Creating venue with data:', venueData)
 
-      const { data: restaurantData, error: restaurantError } = await supabase
-        .from('venues')
+      const { data: restaurantData, error: restaurantError } = await (supabase
+        .from('venues') as any)
         .insert(venueData)
         .select()
         .single()
@@ -119,13 +119,13 @@ export function OnboardingQuestionnaire({ userId, userEmail, onComplete }: Onboa
       console.log('Restaurant created successfully:', restaurantData)
 
       // 2. Create user profile if it doesn't exist
-      const { error: profileError } = await supabase
-        .from('profiles')
+      const { error: profileError } = await (supabase
+        .from('profiles') as any)
         .upsert({
           id: userId,
           email: userEmail,
           role: 'owner',
-          current_venue_id: restaurantData.id,
+          current_venue_id: restaurantData?.id,
           onboarding_completed: true,
           updated_at: new Date().toISOString()
         })
@@ -135,10 +135,10 @@ export function OnboardingQuestionnaire({ userId, userEmail, onComplete }: Onboa
       }
 
       // 3. Link user to venue
-      const { error: memberError } = await supabase
-        .from('venue_members')
+      const { error: memberError } = await (supabase
+        .from('venue_members') as any)
         .insert({
-          venue_id: restaurantData.id,
+          venue_id: restaurantData?.id,
           user_id: userId,
           role: 'owner',
           created_at: new Date().toISOString()

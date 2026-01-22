@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { X, ArrowRight, ArrowLeft, CheckCircle, Building2, User, CreditCard, Loader2, Mail } from 'lucide-react'
+import { X, ArrowRight, ArrowLeft, CheckCircle, Building2, CreditCard, Loader2, Mail } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { supabase, isSupabaseConfigured } from '@/lib/supabase'
 import { toast } from 'sonner'
@@ -72,21 +72,6 @@ export function SignUpModal({ isOpen, onClose, selectedTier }: SignUpModalProps)
     } catch (error) {
       console.error('Google sign-in error:', error)
       toast.error('Failed to sign in with Google')
-    }
-  }
-
-  // Handle Email Sign-Up (for later implementation)
-  const handleEmailSignUp = async () => {
-    if (!canProceed() || !isSupabaseConfigured()) return
-
-    setIsSubmitting(true)
-    
-    try {
-      // For now, just use Google OAuth
-      // Email/password signup can be added later
-      toast.info('Please use Google Sign-In for now')
-    } finally {
-      setIsSubmitting(false)
     }
   }
 
