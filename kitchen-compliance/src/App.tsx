@@ -38,7 +38,7 @@ const FALLBACK_DEMO_SITE: Site = {
   updated_at: new Date().toISOString(),
 }
 
-type AuthState = 'loading' | 'unauthenticated' | 'authenticated' | 'onboarding'
+type AuthState = 'loading' | 'unauthenticated' | 'authenticated' | 'onboarding' | 'demo'
 
 function AppContent() {
   const [currentScreen, setCurrentScreen] = useState<Screen>('home')
@@ -319,6 +319,44 @@ function AppContent() {
     setAuthState('authenticated')
   }
 
+  // Handle demo mode start
+  const handleDemoStart = () => {
+    console.log('🎮 Starting Demo Mode')
+    
+    // Set demo site data
+    const DEMO_SITE = {
+      id: 'demo-site-123',
+      name: 'Demo Restaurant',
+      address: '123 Demo Street, Dublin, Ireland',
+      kiosk_pin: '1234',
+      alert_email: 'demo@example.com',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }
+    
+    setCurrentSite(DEMO_SITE)
+    
+    // Set demo staff members
+    setStaffMembers([
+      { id: 'demo-staff-1', name: 'John Chef', initials: 'JC', role: 'chef', active: true, site_id: 'demo-site-123', created_at: new Date().toISOString() },
+      { id: 'demo-staff-2', name: 'Mary Manager', initials: 'MM', role: 'manager', active: true, site_id: 'demo-site-123', created_at: new Date().toISOString() },
+      { id: 'demo-staff-3', name: 'Sam Staff', initials: 'SS', role: 'staff', active: true, site_id: 'demo-site-123', created_at: new Date().toISOString() },
+    ])
+    
+    // Update settings for demo
+    updateSettings({ subscriptionTier: 'pro' })
+    
+    setAuthState('demo')
+  }
+
+  // Handle exit demo
+  const handleExitDemo = () => {
+    console.log('🚪 Exiting Demo Mode')
+    setAuthState('unauthenticated')
+    setCurrentSite(null as any)
+    setStaffMembers([])
+  }
+
   // Render current screen
   const renderScreen = () => {
     switch (currentScreen) {
@@ -380,7 +418,29 @@ function AppContent() {
   if (authState === 'unauthenticated') {
     return (
       <>
-        <LandingPage onSignIn={() => {}} />
+        <LandingPage onSignIn={() => {}} onDemoStart={handleDemoStart} />
+        <Toaster position="top-center" toastOptions={{ style: toastStyle }} />
+      </>
+    )
+  }
+
+  // Demo mode - show dashboard with demo banner
+  if (authState === 'demo') {
+    return (
+      <>
+        {/* Demo Banner */}
+        <div className="fixed top-0 left-0 right-0 z-[60] bg-amber-500 text-black py-2 px-4 text-center text-sm font-semibold">
+          🎮 Demo Mode - Explore freely! Data won't be saved.
+          <button
+            onClick={handleExitDemo}
+            className="ml-4 px-3 py-1 bg-black/20 rounded-lg hover:bg-black/30 transition-colors"
+          >
+            Exit Demo
+          </button>
+        </div>
+        <div className="pt-10">
+          {renderScreen()}
+        </div>
         <Toaster position="top-center" toastOptions={{ style: toastStyle }} />
       </>
     )

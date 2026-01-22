@@ -10,9 +10,10 @@ import { SignInModal } from './SignInModal'
 
 interface LandingPageProps {
   onSignIn?: () => void
+  onDemoStart?: () => void
 }
 
-export function LandingPage({ onSignIn: _onSignIn }: LandingPageProps) {
+export function LandingPage({ onSignIn: _onSignIn, onDemoStart }: LandingPageProps) {
   const [isSignUpOpen, setIsSignUpOpen] = useState(false)
   const [isSignInOpen, setIsSignInOpen] = useState(false)
   const [selectedTier, setSelectedTier] = useState<'tier1' | 'tier2' | 'tier3'>('tier2')
@@ -105,6 +106,12 @@ export function LandingPage({ onSignIn: _onSignIn }: LandingPageProps) {
             >
               Start Your Free Trial
               <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
+            </button>
+            <button 
+              onClick={onDemoStart}
+              className="px-8 py-4 bg-amber-500/20 border border-amber-500/50 rounded-2xl font-semibold text-lg hover:bg-amber-500/30 transition-all text-amber-400"
+            >
+              🍳 Try Demo
             </button>
             <button 
               onClick={() => setIsSignInOpen(true)}
