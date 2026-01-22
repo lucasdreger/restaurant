@@ -198,9 +198,9 @@ export function OnboardingQuestionnaire({ userId, userEmail, onComplete }: Onboa
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gradient-to-br from-slate-950 via-slate-900 to-emerald-950">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-gradient-to-br from-slate-950 via-slate-900 to-emerald-950 overflow-y-auto">
       {/* Modal */}
-      <div className="relative w-full max-w-2xl bg-gradient-to-br from-slate-900 to-slate-950 rounded-3xl border border-slate-700 shadow-2xl overflow-hidden">
+      <div className="relative w-full max-w-2xl my-auto bg-gradient-to-br from-slate-900 to-slate-950 rounded-2xl sm:rounded-3xl border border-slate-700 shadow-2xl flex flex-col max-h-[95vh] sm:max-h-[90vh]">
         {/* Header */}
         <div className="p-6 pb-4 border-b border-slate-800">
           <div className="flex items-center gap-3 mb-2">
@@ -246,8 +246,8 @@ export function OnboardingQuestionnaire({ userId, userEmail, onComplete }: Onboa
           </div>
         </div>
 
-        {/* Form Content */}
-        <div className="p-8">
+        {/* Form Content - Scrollable */}
+        <div className="p-4 sm:p-6 md:p-8 overflow-y-auto flex-1 min-h-0">
           {/* Step 1: Restaurant Info */}
           {step === 'restaurant' && (
             <div className="space-y-5 animate-fade-in">
@@ -515,9 +515,9 @@ export function OnboardingQuestionnaire({ userId, userEmail, onComplete }: Onboa
           )}
         </div>
 
-        {/* Footer */}
+        {/* Footer - Fixed at bottom */}
         {step !== 'complete' && (
-          <div className="p-6 pt-0 flex items-center justify-between border-t border-slate-800">
+          <div className="p-4 sm:p-6 flex items-center justify-between border-t border-slate-800 bg-slate-900/80 backdrop-blur-sm flex-shrink-0">
             {step !== 'restaurant' ? (
               <button
                 onClick={handlePrevStep}
@@ -534,7 +534,7 @@ export function OnboardingQuestionnaire({ userId, userEmail, onComplete }: Onboa
               onClick={handleNextStep}
               disabled={!canProceed() || isSubmitting}
               className={cn(
-                "flex items-center gap-2 px-8 py-3 rounded-xl font-semibold transition-all",
+                "flex items-center gap-2 px-5 sm:px-8 py-3 rounded-xl font-semibold transition-all text-sm sm:text-base",
                 canProceed() && !isSubmitting
                   ? "bg-gradient-to-r from-emerald-500 to-cyan-500 text-white hover:shadow-lg hover:shadow-emerald-500/30"
                   : "bg-slate-700 text-slate-400 cursor-not-allowed"
