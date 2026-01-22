@@ -46,7 +46,7 @@ function AppContent() {
   const [user, setUser] = useState<User | null>(null)
   const { setCurrentSite, setIsOnline, currentSite, settings, updateSettings, setStaffMembers } = useAppStore()
 
-  // Main authentication effect
+  // Main authentication effect - runs once on mount
   useEffect(() => {
     if (!isSupabaseConfigured()) {
       console.log('🔧 Supabase not configured - showing landing')
@@ -55,14 +55,16 @@ function AppContent() {
     }
 
     let mounted = true
+    let authStateRef = 'loading' // Track state locally to avoid stale closure
     
-    // Timeout to prevent infinite loading - show landing after 2 seconds
+    // Timeout to prevent infinite loading - show landing after 3 seconds
     const loadingTimeout = setTimeout(() => {
-      if (mounted && authState === 'loading') {
+      if (mounted && authStateRef === 'loading') {
         console.log('⏰ Auth check timeout - showing landing')
         setAuthState('unauthenticated')
+        authStateRef = 'unauthenticated'
       }
-    }, 2000)
+    }, 3000)
 
     // Function to check profile and determine auth state
     const checkProfileAndSetState = async (session: Session) => {
@@ -81,35 +83,28 @@ function AppContent() {
         
         if (error || !profile || !profile.onboarding_completed) {
           setAuthState('onboarding')
+          authStateRef = 'onboarding'
         } else {
           setAuthState('authenticated')
+          authStateRef = 'authenticated'
         }
       } catch (err) {
         console.error('Profile check error:', err)
-        if (mounted) setAuthState('onboarding')
+        if (mounted) {
+          setAuthState('onboarding')
+          authStateRef = 'onboarding'
+        }
       }
     }
 
-    // Initial session check with timeout
+    // Initial session check
     const initAuth = async () => {
       console.log('🔍 Initializing auth...')
       
       try {
-        // Race between getSession and a timeout
-        const sessionPromise = supabase.auth.getSession()
-        const timeoutPromise = new Promise<null>((resolve) => 
-          setTimeout(() => resolve(null), 1500)
-        )
+        const { data: { session }, error } = await supabase.auth.getSession()
         
-        const result = await Promise.race([sessionPromise, timeoutPromise])
-        
-        if (!result || !mounted) {
-          console.log('⏰ Session check timeout')
-          if (mounted) setAuthState('unauthenticated')
-          return
-        }
-        
-        const { data: { session }, error } = result
+        if (!mounted) return
         
         console.log('📊 Initial session:', { 
           hasSession: !!session, 
@@ -121,11 +116,15 @@ function AppContent() {
           setUser(session.user)
           await checkProfileAndSetState(session)
         } else {
-          if (mounted) setAuthState('unauthenticated')
+          setAuthState('unauthenticated')
+          authStateRef = 'unauthenticated'
         }
       } catch (err) {
         console.error('Auth init error:', err)
-        if (mounted) setAuthState('unauthenticated')
+        if (mounted) {
+          setAuthState('unauthenticated')
+          authStateRef = 'unauthenticated'
+        }
       }
     }
 
@@ -144,8 +143,13 @@ function AppContent() {
         } else if (event === 'SIGNED_OUT') {
           setUser(null)
           setAuthState('unauthenticated')
+          authStateRef = 'unauthenticated'
         } else if (event === 'TOKEN_REFRESHED' && session?.user) {
           setUser(session.user)
+        } else if (event === 'INITIAL_SESSION' && session?.user) {
+          // Handle OAuth redirect - session already established
+          setUser(session.user)
+          await checkProfileAndSetState(session)
         }
       }
     )
@@ -155,7 +159,7 @@ function AppContent() {
       clearTimeout(loadingTimeout)
       subscription.unsubscribe()
     }
-  }, [authState])
+  }, []) // Empty dependency array - run once on mount
 
   // Apply theme class to document
   useEffect(() => {
