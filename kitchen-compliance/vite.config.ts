@@ -6,6 +6,8 @@ import path from 'path'
 
 // https://vite.dev/config/
 export default defineConfig({
+  // Base path for GitHub Pages deployment
+  base: '/restaurant/',
   plugins: [
     react(),
     tailwindcss(),
@@ -20,8 +22,8 @@ export default defineConfig({
         background_color: '#0f172a',
         display: 'standalone',
         orientation: 'portrait',
-        scope: '/',
-        start_url: '/',
+        scope: '/restaurant/',
+        start_url: '/restaurant/',
         icons: [
           {
             src: 'pwa-192x192.png',
