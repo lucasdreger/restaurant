@@ -48,6 +48,12 @@ function AppContent() {
 
   // Main authentication effect - runs once on mount
   useEffect(() => {
+    // Skip auth check if we're in demo mode
+    if (authState === 'demo') {
+      console.log('🎮 In demo mode - skipping auth check')
+      return
+    }
+
     if (!isSupabaseConfigured()) {
       console.log('🔧 Supabase not configured - showing landing')
       setAuthState('unauthenticated')
@@ -55,16 +61,21 @@ function AppContent() {
     }
 
     let mounted = true
-    let authStateRef = 'loading' // Track state locally to avoid stale closure
+    let authStateRef: AuthState = authState // Track state locally to avoid stale closure
     
-    // Timeout to prevent infinite loading - show landing after 3 seconds
+    // Skip if already determined (not loading)
+    if (authState !== 'loading') {
+      return
+    }
+    
+    // Timeout to prevent infinite loading - show landing after 1.5 seconds
     const loadingTimeout = setTimeout(() => {
       if (mounted && authStateRef === 'loading') {
         console.log('⏰ Auth check timeout - showing landing')
         setAuthState('unauthenticated')
         authStateRef = 'unauthenticated'
       }
-    }, 3000)
+    }, 1500)
 
     // Function to check profile and determine auth state
     const checkProfileAndSetState = async (session: Session) => {
@@ -137,6 +148,12 @@ function AppContent() {
         
         if (!mounted) return
         
+        // Don't change state if we're in demo mode
+        if (authStateRef === 'demo') {
+          console.log('🎮 In demo mode - ignoring auth event')
+          return
+        }
+        
         if (event === 'SIGNED_IN' && session?.user) {
           setUser(session.user)
           await checkProfileAndSetState(session)
@@ -159,7 +176,7 @@ function AppContent() {
       clearTimeout(loadingTimeout)
       subscription.unsubscribe()
     }
-  }, []) // Empty dependency array - run once on mount
+  }, [authState]) // Re-run when authState changes to handle demo mode
 
   // Apply theme class to document
   useEffect(() => {
