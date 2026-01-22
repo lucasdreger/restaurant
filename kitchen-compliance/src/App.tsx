@@ -171,46 +171,98 @@ function AppContent() {
   // Track if we've fetched site data
   const hasFetchedSite = useRef(false)
 
-  // Fetch site from Supabase or use fallback (runs once on mount)
+  // Fetch user's venue and set as currentSite (runs when user is authenticated)
   useEffect(() => {
-    if (hasFetchedSite.current) return
+    // Only fetch when user is authenticated and we haven't fetched yet
+    if (authState !== 'authenticated' || !user || hasFetchedSite.current) return
     hasFetchedSite.current = true
 
-    const fetchSite = async () => {
-      if (isSupabaseConfigured()) {
-        try {
-          const { data, error } = await supabase
-            .from('sites')
+    const fetchUserVenue = async () => {
+      if (!isSupabaseConfigured()) {
+        setCurrentSite(FALLBACK_DEMO_SITE)
+        return
+      }
+
+      try {
+        // Get user's profile to find their current_venue_id
+        const { data: profile, error: profileError } = await supabase
+          .from('profiles')
+          .select('current_venue_id')
+          .eq('id', user.id)
+          .single() as { data: { current_venue_id: string | null } | null; error: any }
+
+        if (profileError) {
+          console.warn('Failed to fetch profile:', profileError)
+          setCurrentSite(FALLBACK_DEMO_SITE)
+          return
+        }
+
+        if (profile?.current_venue_id) {
+          // Fetch the venue details
+          const { data: venue, error: venueError } = await supabase
+            .from('venues')
             .select('*')
-            .limit(1)
+            .eq('id', profile.current_venue_id)
             .single() as { data: any; error: any }
 
-          if (!error && data) {
+          if (!venueError && venue) {
+            console.log('✅ Loaded user venue:', venue.name)
+            // Map venue to Site interface
             setCurrentSite({
-              id: data.id,
-              name: data.name,
-              address: data.address || undefined,
-              kiosk_pin: data.kiosk_pin || undefined,
-              alert_email: data.alert_email || undefined,
-              alert_phone: data.alert_phone || undefined,
-              created_at: data.created_at || new Date().toISOString(),
-              updated_at: data.updated_at || new Date().toISOString(),
+              id: venue.id,
+              name: venue.name,
+              address: venue.address || undefined,
+              kiosk_pin: venue.kiosk_pin || undefined,
+              alert_email: venue.alert_email || undefined,
+              alert_phone: venue.alert_phone || undefined,
+              created_at: venue.created_at || new Date().toISOString(),
+              updated_at: venue.updated_at || new Date().toISOString(),
             })
             
-            if (data.subscription_tier) {
-              updateSettings({ subscriptionTier: data.subscription_tier as 'basic' | 'pro' | 'enterprise' })
+            if (venue.subscription_tier) {
+              updateSettings({ subscriptionTier: venue.subscription_tier as 'basic' | 'pro' | 'enterprise' })
             }
             return
           }
-        } catch (err) {
-          console.warn('Failed to fetch site:', err)
         }
+
+        // Fallback: try to find any venue created by this user
+        const { data: ownedVenue, error: ownedError } = await supabase
+          .from('venues')
+          .select('*')
+          .eq('created_by', user.id)
+          .limit(1)
+          .single() as { data: any; error: any }
+
+        if (!ownedError && ownedVenue) {
+          console.log('✅ Loaded owned venue:', ownedVenue.name)
+          setCurrentSite({
+            id: ownedVenue.id,
+            name: ownedVenue.name,
+            address: ownedVenue.address || undefined,
+            kiosk_pin: ownedVenue.kiosk_pin || undefined,
+            alert_email: ownedVenue.alert_email || undefined,
+            alert_phone: ownedVenue.alert_phone || undefined,
+            created_at: ownedVenue.created_at || new Date().toISOString(),
+            updated_at: ownedVenue.updated_at || new Date().toISOString(),
+          })
+          
+          if (ownedVenue.subscription_tier) {
+            updateSettings({ subscriptionTier: ownedVenue.subscription_tier as 'basic' | 'pro' | 'enterprise' })
+          }
+          return
+        }
+
+        console.warn('No venue found for user, using demo site')
+        setCurrentSite(FALLBACK_DEMO_SITE)
+      } catch (err) {
+        console.warn('Failed to fetch venue:', err)
+        setCurrentSite(FALLBACK_DEMO_SITE)
       }
-      setCurrentSite(FALLBACK_DEMO_SITE)
     }
 
-    fetchSite()
-  }, [setCurrentSite, updateSettings])
+    fetchUserVenue()
+  }, [authState, user, setCurrentSite, updateSettings])
 
   // Load staff members when site changes
   useEffect(() => {

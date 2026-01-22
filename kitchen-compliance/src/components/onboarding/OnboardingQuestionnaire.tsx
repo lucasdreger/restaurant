@@ -118,6 +118,27 @@ export function OnboardingQuestionnaire({ userId, userEmail, onComplete }: Onboa
 
       console.log('Restaurant created successfully:', restaurantData)
 
+      // Also create a corresponding entry in the 'sites' table
+      // This is needed because fridges, staff, cooling sessions, etc. reference sites(id)
+      const siteData = {
+        id: restaurantData.id, // Use the same ID as the venue
+        name: formData.restaurantName,
+        address: `${formData.address}, ${formData.city}, ${formData.country}`,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      }
+
+      const { error: siteError } = await (supabase
+        .from('sites') as any)
+        .upsert(siteData, { onConflict: 'id' })
+
+      if (siteError) {
+        console.warn('Site creation warning (may already exist):', siteError)
+        // Don't fail onboarding if site creation fails - it might already exist
+      } else {
+        console.log('Site created/updated successfully with ID:', restaurantData.id)
+      }
+
       // 2. Create user profile if it doesn't exist
       const { error: profileError } = await (supabase
         .from('profiles') as any)
