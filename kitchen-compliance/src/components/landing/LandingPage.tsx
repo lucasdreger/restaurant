@@ -28,7 +28,7 @@ export function LandingPage({ onSignIn: _onSignIn, onDemoStart }: LandingPagePro
               <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-500 to-cyan-500 flex items-center justify-center">
                 <ChefHat className="w-6 h-6 text-white" />
               </div>
-              <span className="text-xl font-bold">ChefCompliance</span>
+              <span className="text-xl font-bold">ChefVoice</span>
             </div>
             <div className="flex items-center gap-4">
               <button 
@@ -414,14 +414,14 @@ export function LandingPage({ onSignIn: _onSignIn, onDemoStart }: LandingPagePro
               <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-emerald-500 to-cyan-500 flex items-center justify-center">
                 <ChefHat className="w-5 h-5 text-white" />
               </div>
-              <span className="font-bold">ChefCompliance</span>
+              <span className="font-bold">ChefVoice</span>
             </div>
             <div className="flex items-center gap-6 text-sm text-slate-400">
               <a href="#" className="hover:text-white transition-colors">Privacy Policy</a>
               <a href="#" className="hover:text-white transition-colors">Terms of Service</a>
               <a href="#" className="hover:text-white transition-colors">Contact</a>
             </div>
-            <p className="text-sm text-slate-500">© 2026 ChefCompliance. All rights reserved.</p>
+            <p className="text-sm text-slate-500">© 2026 ChefVoice. All rights reserved.</p>
           </div>
         </div>
       </footer>
