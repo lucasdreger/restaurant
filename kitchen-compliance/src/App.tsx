@@ -15,7 +15,7 @@ import { useAppStore } from '@/store/useAppStore'
 import { supabase, isSupabaseConfigured } from '@/lib/supabase'
 import { getStaffMembers } from '@/services/settingsService'
 import type { Site } from '@/types'
-import type { User } from '@supabase/supabase-js'
+import type { User, Session } from '@supabase/supabase-js'
 
 // Create a client
 const queryClient = new QueryClient({
@@ -38,108 +38,124 @@ const FALLBACK_DEMO_SITE: Site = {
   updated_at: new Date().toISOString(),
 }
 
+type AuthState = 'loading' | 'unauthenticated' | 'authenticated' | 'onboarding'
+
 function AppContent() {
   const [currentScreen, setCurrentScreen] = useState<Screen>('home')
-  
-  // Check for demo mode via URL param (?demo=true) or dev shortcut
-  const isDemoMode = () => {
-    const urlParams = new URLSearchParams(window.location.search)
-    return urlParams.get('demo') === 'true' || urlParams.has('dev')
-  }
-  
-  const [showLanding, setShowLanding] = useState(!isDemoMode()) // Skip landing if demo mode
+  const [authState, setAuthState] = useState<AuthState>('loading')
   const [user, setUser] = useState<User | null>(null)
-  const [needsOnboarding, setNeedsOnboarding] = useState(false)
-  const [isCheckingAuth, setIsCheckingAuth] = useState(true)
   const { setCurrentSite, setIsOnline, currentSite, settings, updateSettings, setStaffMembers } = useAppStore()
 
-  // Check authentication status
+  // Main authentication effect
   useEffect(() => {
     if (!isSupabaseConfigured()) {
-      setIsCheckingAuth(false)
+      console.log('🔧 Supabase not configured - showing landing')
+      setAuthState('unauthenticated')
       return
     }
 
-    const checkAuth = async () => {
+    let mounted = true
+    
+    // Timeout to prevent infinite loading - show landing after 2 seconds
+    const loadingTimeout = setTimeout(() => {
+      if (mounted && authState === 'loading') {
+        console.log('⏰ Auth check timeout - showing landing')
+        setAuthState('unauthenticated')
+      }
+    }, 2000)
+
+    // Function to check profile and determine auth state
+    const checkProfileAndSetState = async (session: Session) => {
+      if (!mounted) return
+      
       try {
-        const { data: { session } } = await supabase.auth.getSession()
+        const { data: profile, error } = await supabase
+          .from('profiles')
+          .select('onboarding_completed')
+          .eq('id', session.user.id)
+          .maybeSingle() as { data: { onboarding_completed: boolean } | null; error: any }
+        
+        if (!mounted) return
+        
+        console.log('👤 Profile check:', { profile, error })
+        
+        if (error || !profile || !profile.onboarding_completed) {
+          setAuthState('onboarding')
+        } else {
+          setAuthState('authenticated')
+        }
+      } catch (err) {
+        console.error('Profile check error:', err)
+        if (mounted) setAuthState('onboarding')
+      }
+    }
+
+    // Initial session check with timeout
+    const initAuth = async () => {
+      console.log('🔍 Initializing auth...')
+      
+      try {
+        // Race between getSession and a timeout
+        const sessionPromise = supabase.auth.getSession()
+        const timeoutPromise = new Promise<null>((resolve) => 
+          setTimeout(() => resolve(null), 1500)
+        )
+        
+        const result = await Promise.race([sessionPromise, timeoutPromise])
+        
+        if (!result || !mounted) {
+          console.log('⏰ Session check timeout')
+          if (mounted) setAuthState('unauthenticated')
+          return
+        }
+        
+        const { data: { session }, error } = result
+        
+        console.log('📊 Initial session:', { 
+          hasSession: !!session, 
+          email: session?.user?.email,
+          error: error?.message 
+        })
         
         if (session?.user) {
           setUser(session.user)
-          setShowLanding(false)
-          
-          // Check if user needs onboarding (with timeout)
-          const profileCheckPromise = supabase
-            .from('profiles')
-            .select('onboarding_completed, current_venue_id')
-            .eq('id', session.user.id)
-            .maybeSingle()
-          
-          const timeoutPromise = new Promise((_, reject) => 
-            setTimeout(() => reject(new Error('Timeout')), 2000)
-          )
-          
-          try {
-            const { data: profile } = await Promise.race([profileCheckPromise, timeoutPromise]) as any
-            
-            if (!profile || !profile.onboarding_completed) {
-              setNeedsOnboarding(true)
-            }
-          } catch (profileError) {
-            // If timeout or error, assume needs onboarding
-            console.log('Profile check skipped (timeout or error):', profileError)
-            setNeedsOnboarding(true)
-          }
+          await checkProfileAndSetState(session)
+        } else {
+          if (mounted) setAuthState('unauthenticated')
         }
-      } catch (error) {
-        console.error('Auth check error:', error)
-      } finally {
-        setIsCheckingAuth(false)
+      } catch (err) {
+        console.error('Auth init error:', err)
+        if (mounted) setAuthState('unauthenticated')
       }
     }
 
-    checkAuth()
+    initAuth()
 
-    // Listen for auth changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      setUser(session?.user ?? null)
-      
-      if (session?.user) {
-        setShowLanding(false)
+    // Listen for auth state changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (event, session) => {
+        console.log('🔄 Auth event:', event, session?.user?.email)
         
-        // Check onboarding status with timeout
-        const profileCheckPromise = supabase
-          .from('profiles')
-          .select('onboarding_completed, current_venue_id')
-          .eq('id', session.user.id)
-          .maybeSingle()
+        if (!mounted) return
         
-        const timeoutPromise = new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Timeout')), 2000)
-        )
-        
-        try {
-          const { data: profile } = await Promise.race([profileCheckPromise, timeoutPromise]) as any
-          
-          if (!profile || !profile.onboarding_completed) {
-            setNeedsOnboarding(true)
-          } else {
-            setNeedsOnboarding(false)
-          }
-        } catch (profileError) {
-          console.log('Profile check skipped (timeout or error):', profileError)
-          setNeedsOnboarding(true)
+        if (event === 'SIGNED_IN' && session?.user) {
+          setUser(session.user)
+          await checkProfileAndSetState(session)
+        } else if (event === 'SIGNED_OUT') {
+          setUser(null)
+          setAuthState('unauthenticated')
+        } else if (event === 'TOKEN_REFRESHED' && session?.user) {
+          setUser(session.user)
         }
-      } else {
-        setShowLanding(true)
-        setNeedsOnboarding(false)
       }
-    })
+    )
 
     return () => {
+      mounted = false
+      clearTimeout(loadingTimeout)
       subscription.unsubscribe()
     }
-  }, [])
+  }, [authState])
 
   // Apply theme class to document
   useEffect(() => {
@@ -159,13 +175,11 @@ function AppContent() {
     const fetchSite = async () => {
       if (isSupabaseConfigured()) {
         try {
-          const { data: rawData, error } = await (supabase
-            .from('sites') as any)
+          const { data, error } = await supabase
+            .from('sites')
             .select('*')
             .limit(1)
-            .single()
-            
-          const data = rawData as any
+            .single() as { data: any; error: any }
 
           if (!error && data) {
             setCurrentSite({
@@ -179,18 +193,15 @@ function AppContent() {
               updated_at: data.updated_at || new Date().toISOString(),
             })
             
-            // Sync subscription tier from database to store settings
             if (data.subscription_tier) {
               updateSettings({ subscriptionTier: data.subscription_tier as 'basic' | 'pro' | 'enterprise' })
             }
             return
           }
         } catch (err) {
-          console.warn('Failed to fetch site from Supabase:', err)
+          console.warn('Failed to fetch site:', err)
         }
       }
-
-      // Fallback to demo site if no data from Supabase
       setCurrentSite(FALLBACK_DEMO_SITE)
     }
 
@@ -213,7 +224,6 @@ function AppContent() {
           site_id: s.site_id,
           created_at: s.created_at,
         })))
-        console.log('Staff loaded:', staffData.length, 'members')
       } catch (err) {
         console.warn('Failed to fetch staff:', err)
       }
@@ -229,7 +239,6 @@ function AppContent() {
 
     window.addEventListener('online', handleOnline)
     window.addEventListener('offline', handleOffline)
-
     setIsOnline(navigator.onLine)
 
     return () => {
@@ -241,6 +250,17 @@ function AppContent() {
   // Handle navigation
   const handleNavigate = (screen: string) => {
     setCurrentScreen(screen as Screen)
+  }
+
+  // Handle logout
+  const handleLogout = async () => {
+    console.log('🚪 Logging out...')
+    await supabase.auth.signOut()
+  }
+
+  // Handle onboarding complete
+  const handleOnboardingComplete = () => {
+    setAuthState('authenticated')
   }
 
   // Render current screen
@@ -271,7 +291,7 @@ function AppContent() {
     }
   }
 
-  // Dynamic toast styles based on theme
+  // Toast styles
   const toastStyle = settings.theme === 'day' 
     ? {
         background: '#ffffff',
@@ -288,73 +308,53 @@ function AppContent() {
         boxShadow: '0 4px 20px rgba(0, 0, 0, 0.3)',
       }
 
-  // Show loading while checking auth
-  if (isCheckingAuth) {
+  // Loading state
+  if (authState === 'loading') {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-emerald-950 flex items-center justify-center">
+      <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 flex items-center justify-center">
         <div className="text-center">
-          <div className="w-16 h-16 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
-          <p className="text-slate-400">Loading...</p>
+          <div className="w-12 h-12 border-4 border-emerald-500/30 border-t-emerald-500 rounded-full animate-spin mx-auto mb-4"></div>
+          <p className="text-slate-400 text-sm">Loading...</p>
         </div>
       </div>
     )
   }
 
-  // Show onboarding for authenticated users who haven't completed it
-  if (user && needsOnboarding) {
+  // Unauthenticated - show landing
+  if (authState === 'unauthenticated') {
+    return (
+      <>
+        <LandingPage onSignIn={() => {}} />
+        <Toaster position="top-center" toastOptions={{ style: toastStyle }} />
+      </>
+    )
+  }
+
+  // Onboarding needed
+  if (authState === 'onboarding' && user) {
     return (
       <>
         <OnboardingQuestionnaire
           userId={user.id}
           userEmail={user.email || ''}
-          onComplete={() => setNeedsOnboarding(false)}
+          onComplete={handleOnboardingComplete}
         />
-        <Toaster
-          position="top-center"
-          toastOptions={{
-            style: {
-              background: '#1e293b',
-              color: '#f8fafc',
-              border: '1px solid #334155',
-              borderRadius: '0.875rem',
-              boxShadow: '0 4px 20px rgba(0, 0, 0, 0.3)',
-            },
-          }}
-        />
+        <Toaster position="top-center" toastOptions={{ style: toastStyle }} />
       </>
     )
   }
 
-  // Show landing page for new visitors
-  if (showLanding) {
-    return (
-      <>
-        <LandingPage onSignIn={() => setShowLanding(false)} />
-        <Toaster
-          position="top-center"
-          toastOptions={{
-            style: {
-              background: '#1e293b',
-              color: '#f8fafc',
-              border: '1px solid #334155',
-              borderRadius: '0.875rem',
-              boxShadow: '0 4px 20px rgba(0, 0, 0, 0.3)',
-            },
-          }}
-        />
-      </>
-    )
-  }
-
+  // Authenticated - show dashboard
   return (
     <>
+      <button
+        onClick={handleLogout}
+        className="fixed top-4 right-4 z-50 px-4 py-2 bg-red-500/20 border border-red-500/50 text-red-400 rounded-lg text-sm hover:bg-red-500/30 transition-colors"
+      >
+        🚪 Logout
+      </button>
       {renderScreen()}
-      <Toaster
-        position="top-center"
-        toastOptions={{
-          style: toastStyle,
-        }}
-      />
+      <Toaster position="top-center" toastOptions={{ style: toastStyle }} />
     </>
   )
 }

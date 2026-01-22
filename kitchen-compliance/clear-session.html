@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html>
+<head><title>Clear Session</title></head>
+<body>
+<script type="module">
+import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm'
+
+const supabase = createClient(
+  'https://uwobjrgouqtkawgcvabr.supabase.co',
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InV3b2JqcmdvdXF0a2F3Z2N2YWJyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njg2MTc1NjEsImV4cCI6MjA4NDE5MzU2MX0.zpqMrZXNy_Z2zO-_Cwu0bQX-o6g-ow3dhJXXz6lfTW8'
+)
+
+async function clearSession() {
+  const { error } = await supabase.auth.signOut()
+  if (error) {
+    document.body.innerHTML = '<h1>Error: ' + error.message + '</h1>'
+  } else {
+    document.body.innerHTML = '<h1>Session cleared! You can close this tab.</h1>'
+    console.log('Session cleared successfully')
+  }
+}
+
+clearSession()
+</script>
+<h1>Clearing session...</h1>
+</body>
+</html>
