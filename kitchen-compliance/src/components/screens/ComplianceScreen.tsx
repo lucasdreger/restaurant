@@ -200,15 +200,16 @@ export function ComplianceScreen({ onBack }: ComplianceScreenProps) {
   }
 
   return (
-    <div className="min-h-screen bg-theme-primary text-theme-primary transition-colors duration-300">
+    <div className="min-h-full bg-theme-primary text-theme-primary transition-colors duration-300">
       
       {/* Header */}
       <div className="sticky top-0 z-10 bg-glass-heavy border-b border-theme-primary p-4 md:p-6 backdrop-blur-md">
         <div className="max-w-7xl mx-auto flex flex-col md:flex-row md:items-center justify-between gap-6">
          <div className="flex items-center gap-4">
+            {/* Back button - only show on mobile/tablet */}
             <button 
               onClick={onBack}
-              className="p-3 rounded-xl hover:bg-theme-ghost text-theme-secondary hover:text-theme-primary transition-colors"
+              className="lg:hidden p-3 rounded-xl hover:bg-theme-ghost text-theme-secondary hover:text-theme-primary transition-colors"
             >
               <ArrowLeft className="w-6 h-6" />
             </button>

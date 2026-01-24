@@ -129,13 +129,13 @@ export function StartCoolingModal({
         {/* Search Bar */}
         <div className="px-4 py-3 border-b border-theme-primary">
           <div className="relative">
-            <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-theme-muted" />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-theme-muted pointer-events-none z-10" />
             <input
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search food items..."
-              className="w-full pl-12 pr-4 py-3 bg-theme-input border border-theme-input rounded-xl text-theme-primary placeholder:text-theme-muted focus:outline-none focus:ring-2 focus:ring-sky-500"
+              className="input-stunning !pl-11"
             />
           </div>
         </div>

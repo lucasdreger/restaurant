@@ -111,11 +111,11 @@ export function DashboardHeader({
         </div>
         <div className="flex-1 max-w-md ml-auto">
           <div className="relative">
-            <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-theme-muted pointer-events-none" />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-theme-muted pointer-events-none z-10" />
             <input
               type="text"
-              placeholder="    Search records, items, staff..."
-              className="input-stunning pl-11"
+              placeholder="Search records, items, staff..."
+              className="input-stunning !pl-10"
             />
           </div>
         </div>

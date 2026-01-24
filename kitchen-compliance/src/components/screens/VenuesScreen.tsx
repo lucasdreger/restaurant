@@ -97,14 +97,15 @@ export function VenuesScreen({ onBack }: VenuesScreenProps) {
   }
 
   return (
-    <div className="min-h-screen bg-theme-primary">
+    <div className="min-h-full bg-theme-primary text-theme-primary">
       {/* Header */}
       <header className="sticky top-0 z-40 bg-glass-heavy border-b border-glass">
         <div className="flex items-center justify-between px-4 lg:px-6 h-16">
           <div className="flex items-center gap-4">
+            {/* Back button - only show on mobile/tablet */}
             <button
               onClick={onBack}
-              className="p-2 hover:bg-theme-ghost rounded-xl transition-colors"
+              className="lg:hidden p-2 hover:bg-theme-ghost rounded-xl transition-colors"
             >
               <ArrowLeft className="w-5 h-5 text-theme-secondary" />
             </button>
@@ -120,13 +121,13 @@ export function VenuesScreen({ onBack }: VenuesScreenProps) {
           </div>
           <div className="flex items-center gap-2">
             <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-theme-muted" />
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-theme-muted pointer-events-none z-10" />
               <input
                 type="text"
                 placeholder="Search venues..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="input-stunning pl-10 w-64"
+                className="input-stunning !pl-10 w-64"
               />
             </div>
             <button className="btn-stunning btn-primary">

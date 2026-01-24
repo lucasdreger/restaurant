@@ -94,14 +94,15 @@ export function ReportsScreen({ onBack }: ReportsScreenProps) {
   const maxSessions = Math.max(...weeklyTrends.map(d => d.sessions))
 
   return (
-    <div className="min-h-screen bg-theme-primary">
+    <div className="min-h-full bg-theme-primary text-theme-primary">
       {/* Header */}
       <header className="sticky top-0 z-40 bg-glass-heavy border-b border-glass">
         <div className="flex items-center justify-between px-4 lg:px-6 h-16">
           <div className="flex items-center gap-4">
+            {/* Back button - only show on mobile/tablet */}
             <button
               onClick={onBack}
-              className="p-2 hover:bg-theme-ghost rounded-xl transition-colors"
+              className="lg:hidden p-2 hover:bg-theme-ghost rounded-xl transition-colors"
             >
               <ArrowLeft className="w-5 h-5 text-theme-secondary" />
             </button>

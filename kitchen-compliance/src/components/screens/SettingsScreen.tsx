@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
-import { ArrowLeft, Check, Users, UtensilsCrossed, Sun, Moon, Palette, CreditCard, Mic, Plus, Trash2, Volume2, ShieldCheck, UserPlus, Coffee, Thermometer, Edit2, X, Building2, RotateCcw, Loader2 } from 'lucide-react'
-import { useAppStore, type AppTheme, WAKE_WORD_OPTIONS, type WakeWordId } from '@/store/useAppStore'
+import { ArrowLeft, Check, Users, UtensilsCrossed, Sun, Moon, Palette, CreditCard, Mic, Plus, Trash2, Volume2, ShieldCheck, UserPlus, Coffee, Thermometer, Edit2, X, Building2, RotateCcw, Loader2, Scan, Eye, Cpu, Zap } from 'lucide-react'
+import { useAppStore, type AppTheme, WAKE_WORD_OPTIONS, type WakeWordId, type OCRModel } from '@/store/useAppStore'
+import { OCR_MODEL_INFO, isProviderAvailable } from '@/services/ocrService'
 import { cn } from '@/lib/utils'
 import { getStaffMembers, createStaffMember, deleteStaffMember, getFoodPresets, createFoodPreset, deleteFoodPreset, updateSiteSubscription } from '@/services/settingsService'
 import { getFridges, createFridge, updateFridge, deleteFridge, FRIDGE_LIMITS, type Fridge } from '@/services/fridgeService'
@@ -12,22 +13,26 @@ interface SettingsScreenProps {
   onBack: () => void
 }
 
-type SettingsTab = 'general' | 'appearance' | 'staff' | 'food' | 'voice' | 'subscription' | 'fridges'
+type SettingsTab = 'general' | 'appearance' | 'staff' | 'food' | 'voice' | 'ocr' | 'subscription' | 'fridges'
 
 export function SettingsScreen({ onBack }: SettingsScreenProps) {
   const { 
     settings, 
     updateSettings,
-    currentSite
+    currentSite,
+    venueCache,
+    setVenueCache,
+    dataLoaded,
+    setDataLoaded
   } = useAppStore()
   
   const [activeTab, setActiveTab] = useState<SettingsTab>('general')
   const [loading, setLoading] = useState(false)
 
-  // Venue State (from database)
-  const [venue, setVenue] = useState<{ id: string; name: string } | null>(null)
-  const [venueLoading, setVenueLoading] = useState(true)
-  const [venueName, setVenueName] = useState('')
+  // Venue State - use cache first
+  const [venue, setVenue] = useState<{ id: string; name: string } | null>(venueCache)
+  const [venueLoading, setVenueLoading] = useState(!venueCache) // Only loading if not cached
+  const [venueName, setVenueName] = useState(venueCache?.name || '')
   const [savingVenue, setSavingVenue] = useState(false)
 
   // Staff State
@@ -47,8 +52,16 @@ export function SettingsScreen({ onBack }: SettingsScreenProps) {
   const [editingFridgeId, setEditingFridgeId] = useState<string | null>(null)
   const [editingFridgeName, setEditingFridgeName] = useState('')
 
-  // Load venue data on mount
+  // Load venue data on mount - only if not cached
   useEffect(() => {
+    // If we have cached data, use it immediately
+    if (venueCache) {
+      setVenue(venueCache)
+      setVenueName(venueCache.name)
+      setVenueLoading(false)
+      return
+    }
+
     const loadVenue = async () => {
       setVenueLoading(true)
       try {
@@ -77,6 +90,8 @@ export function SettingsScreen({ onBack }: SettingsScreenProps) {
           if (venueData && !error) {
             setVenue(venueData)
             setVenueName(venueData.name)
+            // Cache the venue data
+            setVenueCache({ ...venueData, loadedAt: Date.now() })
           }
         } else {
           // Fallback: try to get any venue created by this user
@@ -90,6 +105,8 @@ export function SettingsScreen({ onBack }: SettingsScreenProps) {
           if (venueData) {
             setVenue(venueData)
             setVenueName(venueData.name)
+            // Cache the venue data
+            setVenueCache({ ...venueData, loadedAt: Date.now() })
           }
         }
       } catch (error) {
@@ -100,18 +117,18 @@ export function SettingsScreen({ onBack }: SettingsScreenProps) {
     }
 
     loadVenue()
-  }, [])
+  }, [venueCache, setVenueCache])
 
-  // Load Data on Tab Change
+  // Load Data on Tab Change - only if not already loaded
   useEffect(() => {
-    if (activeTab === 'staff' && currentSite?.id) {
+    if (activeTab === 'staff' && currentSite?.id && !dataLoaded.staff) {
       loadStaff()
-    } else if (activeTab === 'food') {
+    } else if (activeTab === 'food' && !dataLoaded.food) {
       loadFood()
-    } else if (activeTab === 'fridges' && currentSite?.id) {
+    } else if (activeTab === 'fridges' && currentSite?.id && !dataLoaded.fridges) {
       loadFridges()
     }
-  }, [activeTab, currentSite?.id])
+  }, [activeTab, currentSite?.id, dataLoaded])
 
   // --- Staff Handlers ---
   const loadStaff = async () => {
@@ -120,6 +137,7 @@ export function SettingsScreen({ onBack }: SettingsScreenProps) {
     try {
       const data = await getStaffMembers(currentSite.id)
       setStaffList(data)
+      setDataLoaded('staff', true)
     } catch (error) {
       console.error(error)
       toast.error('Failed to load staff')
@@ -177,6 +195,7 @@ export function SettingsScreen({ onBack }: SettingsScreenProps) {
     try {
       const data = await getFoodPresets(currentSite?.id)
       setFoodList(data)
+      setDataLoaded('food', true)
     } catch (error) {
       console.error(error)
       toast.error('Failed to load food presets')
@@ -218,6 +237,7 @@ export function SettingsScreen({ onBack }: SettingsScreenProps) {
     try {
       const data = await getFridges(currentSite.id)
       setFridgeList(data)
+      setDataLoaded('fridges', true)
     } catch (error) {
       console.error(error)
       toast.error('Failed to load fridges')
@@ -311,14 +331,15 @@ export function SettingsScreen({ onBack }: SettingsScreenProps) {
   }
 
   return (
-    <div className="min-h-screen bg-theme-primary transition-colors pb-20 animate-fade-in text-theme-primary">
+    <div className="min-h-full transition-colors pb-20 lg:pb-6 animate-fade-in text-theme-primary">
       {/* Header */}
       <div className="sticky top-0 z-10 bg-glass-heavy border-b border-theme-primary p-4 md:p-6 backdrop-blur-md">
         <div className="max-w-5xl mx-auto flex items-center justify-between">
             <div className="flex items-center gap-4">
+              {/* Back button - only show on mobile/tablet */}
               <button 
                 onClick={onBack}
-                className="p-3 rounded-xl hover:bg-theme-ghost text-theme-secondary hover:text-theme-primary transition-colors"
+                className="lg:hidden p-3 rounded-xl hover:bg-theme-ghost text-theme-secondary hover:text-theme-primary transition-colors"
               >
                 <ArrowLeft className="w-5 h-5" />
               </button>
@@ -370,6 +391,12 @@ export function SettingsScreen({ onBack }: SettingsScreenProps) {
             onClick={() => setActiveTab('voice')} 
             icon={Mic} 
             label="Voice Control" 
+          />
+          <MenuButton 
+            active={activeTab === 'ocr'} 
+            onClick={() => setActiveTab('ocr')} 
+            icon={Scan} 
+            label="OCR / Vision" 
           />
           <MenuButton 
             active={activeTab === 'fridges'} 
@@ -426,6 +453,8 @@ export function SettingsScreen({ onBack }: SettingsScreenProps) {
                                 
                                 if (error) throw error
                                 setVenue({ ...venue, name: venueName.trim() })
+                                // Update cache too
+                                setVenueCache({ ...venue, name: venueName.trim(), loadedAt: Date.now() })
                                 toast.success('Restaurant name updated!')
                               } catch (err) {
                                 console.error('Failed to update venue name:', err)
@@ -1039,6 +1068,253 @@ export function SettingsScreen({ onBack }: SettingsScreenProps) {
                                </p>
                              </div>
                            )}
+                        </div>
+                    </div>
+                </div>
+           )}
+
+           {/* OCR TAB */}
+           {activeTab === 'ocr' && (
+                <div className="space-y-6 animate-slide-in">
+                    <div className="card-stunning p-6">
+                        <div className="flex items-center gap-4 mb-8">
+                           <div className="p-4 rounded-full bg-cyan-500/10 text-cyan-500">
+                              <Eye className="w-8 h-8" />
+                           </div>
+                           <div>
+                              <h2 className="text-xl font-bold">OCR / Vision Settings</h2>
+                              <p className="text-theme-muted">Configure invoice scanning and document recognition.</p>
+                           </div>
+                        </div>
+
+                        {/* OCR Provider Selection */}
+                        <div className="space-y-4 mb-8">
+                          <h3 className="text-sm font-semibold uppercase text-theme-muted">OCR Provider</h3>
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                            {/* Tesseract (Free) */}
+                            <button
+                              onClick={() => updateSettings({ ocrProvider: 'tesseract', ocrModel: 'tesseract' })}
+                              className={cn(
+                                "p-4 rounded-xl border-2 transition-all text-left",
+                                settings.ocrProvider === 'tesseract'
+                                  ? "border-emerald-500 bg-emerald-500/10"
+                                  : "border-theme-primary hover:border-theme-secondary"
+                              )}
+                            >
+                              <div className="flex items-center gap-2 mb-2">
+                                <Cpu className="w-5 h-5 text-emerald-500" />
+                                <span className="font-semibold">Tesseract.js</span>
+                                <span className="text-xs px-1.5 py-0.5 bg-emerald-100 text-emerald-700 rounded">Free</span>
+                                {settings.ocrProvider === 'tesseract' && (
+                                  <Check className="w-4 h-4 text-emerald-500 ml-auto" />
+                                )}
+                              </div>
+                              <p className="text-xs text-theme-muted">
+                                Free local OCR, no API key needed. Good for clear documents.
+                              </p>
+                            </button>
+                            
+                            {/* OpenAI */}
+                            <button
+                              onClick={() => updateSettings({ ocrProvider: 'openai', ocrModel: 'openai/gpt-4o' })}
+                              className={cn(
+                                "p-4 rounded-xl border-2 transition-all text-left",
+                                settings.ocrProvider === 'openai'
+                                  ? "border-sky-500 bg-sky-500/10"
+                                  : "border-theme-primary hover:border-theme-secondary"
+                              )}
+                            >
+                              <div className="flex items-center gap-2 mb-2">
+                                <span className="text-lg">🤖</span>
+                                <span className="font-semibold">OpenAI</span>
+                                {settings.ocrProvider === 'openai' && (
+                                  <Check className="w-4 h-4 text-sky-500 ml-auto" />
+                                )}
+                              </div>
+                              <p className="text-xs text-theme-muted">
+                                GPT-4o Vision - excellent accuracy for invoices & handwriting.
+                              </p>
+                            </button>
+                            
+                            {/* OpenRouter */}
+                            <button
+                              onClick={() => updateSettings({ ocrProvider: 'openrouter', ocrModel: 'google/gemini-2.0-flash' })}
+                              className={cn(
+                                "p-4 rounded-xl border-2 transition-all text-left",
+                                settings.ocrProvider === 'openrouter'
+                                  ? "border-purple-500 bg-purple-500/10"
+                                  : "border-theme-primary hover:border-theme-secondary"
+                              )}
+                            >
+                              <div className="flex items-center gap-2 mb-2">
+                                <span className="text-lg">🔀</span>
+                                <span className="font-semibold">OpenRouter</span>
+                                {settings.ocrProvider === 'openrouter' && (
+                                  <Check className="w-4 h-4 text-purple-500 ml-auto" />
+                                )}
+                              </div>
+                              <p className="text-xs text-theme-muted">
+                                Access Claude, Gemini, GPT-4o via single API. Best value.
+                              </p>
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Model Selection (for OpenAI / OpenRouter) */}
+                        {settings.ocrProvider !== 'tesseract' && (
+                          <div className="space-y-4 mb-8">
+                            <h3 className="text-sm font-semibold uppercase text-theme-muted">Vision Model</h3>
+                            <div className="grid grid-cols-1 gap-2">
+                              {(Object.entries(OCR_MODEL_INFO) as [OCRModel, typeof OCR_MODEL_INFO[OCRModel]][])
+                                .filter(([_, info]) => info.provider === settings.ocrProvider)
+                                .map(([modelId, info]) => (
+                                  <button
+                                    key={modelId}
+                                    onClick={() => updateSettings({ ocrModel: modelId })}
+                                    className={cn(
+                                      "p-3 rounded-xl border-2 transition-all text-left flex items-center justify-between",
+                                      settings.ocrModel === modelId
+                                        ? settings.ocrProvider === 'openai' 
+                                          ? "border-sky-500 bg-sky-500/10"
+                                          : "border-purple-500 bg-purple-500/10"
+                                        : "border-theme-primary hover:border-theme-secondary"
+                                    )}
+                                  >
+                                    <div className="flex items-center gap-3">
+                                      <span className="font-medium">{info.name}</span>
+                                      {info.badge && (
+                                        <span className={cn(
+                                          "text-xs px-2 py-0.5 rounded-full",
+                                          info.badge === 'Free' ? "bg-emerald-100 text-emerald-700" :
+                                          info.badge === 'Best' ? "bg-purple-100 text-purple-700" :
+                                          info.badge === 'Value' ? "bg-sky-100 text-sky-700" :
+                                          info.badge === 'Cheap' ? "bg-amber-100 text-amber-700" :
+                                          info.badge === 'Fast' ? "bg-orange-100 text-orange-700" :
+                                          "bg-zinc-100 text-zinc-700"
+                                        )}>
+                                          {info.badge}
+                                        </span>
+                                      )}
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-xs text-theme-muted">{info.price}</span>
+                                      {settings.ocrModel === modelId && (
+                                        <Check className={cn(
+                                          "w-4 h-4",
+                                          settings.ocrProvider === 'openai' ? "text-sky-500" : "text-purple-500"
+                                        )} />
+                                      )}
+                                    </div>
+                                  </button>
+                                ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* API Key Status */}
+                        {settings.ocrProvider !== 'tesseract' && (
+                          <div className="space-y-4 mb-8">
+                            <h3 className="text-sm font-semibold uppercase text-theme-muted">API Key Status</h3>
+                            
+                            {settings.ocrProvider === 'openai' && (
+                              <div className={cn(
+                                "p-4 rounded-xl border",
+                                settings.openaiApiKey 
+                                  ? "border-emerald-500/50 bg-emerald-500/5" 
+                                  : "border-amber-500/50 bg-amber-500/5"
+                              )}>
+                                <div className="flex items-center justify-between">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-lg">🤖</span>
+                                    <span className="font-medium">OpenAI API Key</span>
+                                  </div>
+                                  {settings.openaiApiKey ? (
+                                    <span className="text-xs text-emerald-500 flex items-center gap-1">
+                                      <Check className="w-3 h-3" /> Configured
+                                    </span>
+                                  ) : (
+                                    <span className="text-xs text-amber-500">Not configured</span>
+                                  )}
+                                </div>
+                                {!settings.openaiApiKey && (
+                                  <p className="text-xs text-theme-muted mt-2">
+                                    Add your API key in the <button onClick={() => setActiveTab('voice')} className="text-sky-500 underline">Voice Control</button> tab.
+                                  </p>
+                                )}
+                              </div>
+                            )}
+                            
+                            {settings.ocrProvider === 'openrouter' && (
+                              <div className={cn(
+                                "p-4 rounded-xl border",
+                                settings.openrouterApiKey 
+                                  ? "border-emerald-500/50 bg-emerald-500/5" 
+                                  : "border-amber-500/50 bg-amber-500/5"
+                              )}>
+                                <div className="flex items-center justify-between">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-lg">🔀</span>
+                                    <span className="font-medium">OpenRouter API Key</span>
+                                  </div>
+                                  {settings.openrouterApiKey ? (
+                                    <span className="text-xs text-emerald-500 flex items-center gap-1">
+                                      <Check className="w-3 h-3" /> Configured
+                                    </span>
+                                  ) : (
+                                    <span className="text-xs text-amber-500">Not configured</span>
+                                  )}
+                                </div>
+                                {!settings.openrouterApiKey && (
+                                  <p className="text-xs text-theme-muted mt-2">
+                                    Add your API key in the <button onClick={() => setActiveTab('voice')} className="text-sky-500 underline">Voice Control</button> tab.
+                                  </p>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Current Configuration Summary */}
+                        <div className="p-4 rounded-xl bg-theme-ghost border border-theme-primary">
+                          <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
+                            <Zap className="w-4 h-4 text-amber-500" />
+                            Current OCR Configuration
+                          </h3>
+                          <div className="space-y-2 text-sm">
+                            <div className="flex justify-between">
+                              <span className="text-theme-muted">Provider:</span>
+                              <span className="font-medium">
+                                {settings.ocrProvider === 'tesseract' ? 'Tesseract.js (Free)' : 
+                                 settings.ocrProvider === 'openai' ? 'OpenAI' : 'OpenRouter'}
+                              </span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-theme-muted">Model:</span>
+                              <span className="font-medium">{OCR_MODEL_INFO[settings.ocrModel]?.name || settings.ocrModel}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-theme-muted">Price:</span>
+                              <span className={cn(
+                                "font-medium",
+                                settings.ocrProvider === 'tesseract' ? "text-emerald-500" : "text-theme-primary"
+                              )}>
+                                {OCR_MODEL_INFO[settings.ocrModel]?.price || 'Unknown'}
+                              </span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-theme-muted">Status:</span>
+                              {isProviderAvailable(settings.ocrProvider, { 
+                                openaiApiKey: settings.openaiApiKey, 
+                                openrouterApiKey: settings.openrouterApiKey 
+                              }) ? (
+                                <span className="text-emerald-500 flex items-center gap-1">
+                                  <Check className="w-3 h-3" /> Ready
+                                </span>
+                              ) : (
+                                <span className="text-amber-500">API key needed</span>
+                              )}
+                            </div>
+                          </div>
                         </div>
                     </div>
                 </div>

@@ -23,5 +23,34 @@ export default defineConfig({
   server: {
     host: true, // Expõe para todos os IPs da rede
     port: 5173  // Porta padrão (pode mudar se necessário)
+  },
+  build: {
+    // Enable source maps for debugging in production (optional)
+    sourcemap: false,
+    // Target modern browsers for smaller bundles
+    target: 'es2020',
+    // Manual chunks for better code splitting
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          // Core vendor chunk - React essentials
+          'vendor-react': ['react', 'react-dom'],
+          // State management
+          'vendor-state': ['zustand'],
+          // Supabase client
+          'vendor-supabase': ['@supabase/supabase-js'],
+          // UI utilities
+          'vendor-ui': ['lucide-react'],
+          // Heavy libraries loaded on-demand (PDF generation)
+          'vendor-pdf': ['html2canvas', 'jspdf'],
+        }
+      }
+    },
+    // Increase chunk warning limit to 600KB
+    chunkSizeWarningLimit: 600
+  },
+  // Optimize dependencies
+  optimizeDeps: {
+    include: ['react', 'react-dom', 'zustand', '@supabase/supabase-js', 'lucide-react']
   }
 })

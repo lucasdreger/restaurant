@@ -11,6 +11,19 @@ export type AudioModel =
   | 'openai/gpt-audio'                 // $32/M audio tokens
   | 'openai/gpt-audio-mini'            // $0.60/M audio tokens - cost efficient!
 
+// OCR/Vision models available
+export type OCRModel = 
+  | 'openai/gpt-4o'                    // OpenAI GPT-4o Vision
+  | 'openai/gpt-4o-mini'               // OpenAI GPT-4o Mini (cheaper)
+  | 'anthropic/claude-sonnet'          // Claude 3.5 Sonnet via OpenRouter
+  | 'anthropic/claude-haiku'           // Claude 3 Haiku via OpenRouter (fast/cheap)
+  | 'google/gemini-2.0-flash'          // Gemini 2.0 Flash via OpenRouter
+  | 'google/gemini-flash-1.5'          // Gemini 1.5 Flash via OpenRouter
+  | 'tesseract'                        // Free local Tesseract.js
+
+// OCR provider type
+export type OCRProvider = 'openai' | 'openrouter' | 'tesseract'
+
 // Available wake word options
 export const WAKE_WORD_OPTIONS = [
   { id: 'luma', label: 'Luma', phrases: ['luma', 'hey luma', 'hi luma', 'ok luma', 'okay luma'] },
@@ -28,6 +41,8 @@ interface AppSettings {
   openrouterApiKey: string | null
   voiceProvider: 'browser' | 'openai' | 'openrouter'
   audioModel: AudioModel // Model to use for OpenRouter voice
+  ocrProvider: OCRProvider // OCR provider selection
+  ocrModel: OCRModel // Model to use for OCR
   apiProvider: 'openai' | 'openrouter' // For text/chat APIs (future use)
   language: string
   theme: AppTheme
@@ -43,6 +58,8 @@ const defaultSettings: AppSettings = {
   openrouterApiKey: null,
   voiceProvider: 'browser',
   audioModel: 'openai/gpt-audio-mini', // Default to cost-efficient model
+  ocrProvider: 'tesseract', // Default to free local OCR
+  ocrModel: 'tesseract', // Default to Tesseract
   apiProvider: 'openai',
   language: 'en',
   theme: 'day',
@@ -52,11 +69,31 @@ const defaultSettings: AppSettings = {
   activeWakeWords: ['luma'], // Default to "Luma" wake word
 }
 
+// Venue data cache
+interface VenueCache {
+  id: string
+  name: string
+  loadedAt: number
+}
+
 // App state interface
 interface AppState {
   // Current site
   currentSite: Site | null
   setCurrentSite: (site: Site | null) => void
+
+  // Venue cache (to avoid re-fetching on every navigation)
+  venueCache: VenueCache | null
+  setVenueCache: (venue: VenueCache | null) => void
+  
+  // Data loading state
+  dataLoaded: {
+    staff: boolean
+    food: boolean
+    fridges: boolean
+  }
+  setDataLoaded: (key: 'staff' | 'food' | 'fridges', loaded: boolean) => void
+  resetDataLoaded: () => void
 
   // Staff members
   staffMembers: StaffMember[]
@@ -133,6 +170,17 @@ export const useAppStore = create<AppState>()(
       // Current site
       currentSite: null,
       setCurrentSite: (site) => set({ currentSite: site }),
+
+      // Venue cache
+      venueCache: null,
+      setVenueCache: (venue) => set({ venueCache: venue }),
+      
+      // Data loading state
+      dataLoaded: { staff: false, food: false, fridges: false },
+      setDataLoaded: (key, loaded) => set((state) => ({
+        dataLoaded: { ...state.dataLoaded, [key]: loaded }
+      })),
+      resetDataLoaded: () => set({ dataLoaded: { staff: false, food: false, fridges: false } }),
 
       // Staff members
       staffMembers: [],
@@ -246,6 +294,7 @@ export const useAppStore = create<AppState>()(
       name: 'kitchen-compliance-storage',
       partialize: (state) => ({
         currentSite: state.currentSite,
+        venueCache: state.venueCache,
         staffMembers: state.staffMembers,
         foodPresets: state.foodPresets,
         coolingSessions: state.coolingSessions,

@@ -130,14 +130,15 @@ export function HistoryScreen({ onBack }: HistoryScreenProps) {
   }
 
   return (
-    <div className="min-h-screen bg-theme-primary">
+    <div className="min-h-full bg-theme-primary text-theme-primary">
       {/* Header */}
       <header className="safe-area-top bg-theme-header border-b border-theme-header sticky top-0 z-40">
         <div className="flex items-center justify-between px-4 py-3">
           <div className="flex items-center gap-3">
+            {/* Back button - only show on mobile/tablet */}
             <button
               onClick={onBack}
-              className="p-2 hover:bg-theme-ghost rounded-xl transition-colors text-theme-primary"
+              className="lg:hidden p-2 hover:bg-theme-ghost rounded-xl transition-colors text-theme-primary"
             >
               <ArrowLeft className="w-6 h-6" />
             </button>

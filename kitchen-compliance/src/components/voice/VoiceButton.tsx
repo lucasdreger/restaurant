@@ -171,7 +171,7 @@ export const VoiceButton = forwardRef<VoiceButtonHandle, VoiceButtonProps>(
                   ? 'voice-listening bg-green-500 shadow-lg shadow-green-500/50'
                   : wakeWordActive
                     ? 'bg-gradient-to-b from-rose-600 to-rose-700 hover:from-rose-500 hover:to-rose-600 shadow-lg shadow-rose-500/30'
-                    : 'bg-gradient-to-b from-theme-ghost to-theme-secondary hover:from-theme-secondary hover:to-theme-ghost shadow-lg',
+                    : 'bg-purple-500 hover:bg-purple-600 shadow-lg shadow-purple-500/30',
               'active:scale-95 disabled:opacity-50',
               className
             )}
@@ -218,7 +218,7 @@ export const VoiceButton = forwardRef<VoiceButtonHandle, VoiceButtonProps>(
                 ? 'voice-listening bg-green-500 shadow-lg shadow-green-500/50'
                 : wakeWordActive
                   ? 'bg-gradient-to-b from-rose-600 to-rose-700 hover:from-rose-500 hover:to-rose-600 shadow-lg shadow-rose-500/30 ring-2 ring-rose-500/50'
-                  : 'bg-gradient-to-b from-theme-ghost to-theme-secondary hover:from-theme-secondary hover:to-theme-ghost shadow-lg',
+                  : 'bg-purple-500 hover:bg-purple-600 shadow-lg shadow-purple-500/30',
             'active:scale-95 disabled:opacity-70'
           )}
           aria-label={isListening ? 'Stop listening' : 'Start voice command'}

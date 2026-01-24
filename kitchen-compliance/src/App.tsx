@@ -1,6 +1,10 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, lazy, Suspense, startTransition } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { Toaster } from 'sonner'
+import { useAppStore } from '@/store/useAppStore'
+import { MainLayout } from '@/components/layout/MainLayout'
+
+// Direct imports for fast navigation (main app screens)
 import { Dashboard } from '@/components/screens/Dashboard'
 import { HistoryScreen } from '@/components/screens/HistoryScreen'
 import { SettingsScreen } from '@/components/screens/SettingsScreen'
@@ -9,9 +13,10 @@ import { ReportsScreen } from '@/components/screens/ReportsScreen'
 import { VenuesScreen } from '@/components/screens/VenuesScreen'
 import { MenuEngineeringScreen } from '@/components/menu/MenuEngineeringScreen'
 import { GoodsReceiptScreen } from '@/components/receipt/GoodsReceiptScreen'
-import { LandingPage } from '@/components/landing/LandingPage'
-import { OnboardingQuestionnaire } from '@/components/onboarding/OnboardingQuestionnaire'
-import { useAppStore } from '@/store/useAppStore'
+
+// Lazy load only auth/onboarding screens (used less frequently)
+const LandingPage = lazy(() => import('@/components/landing/LandingPage').then(m => ({ default: m.LandingPage })))
+const OnboardingQuestionnaire = lazy(() => import('@/components/onboarding/OnboardingQuestionnaire').then(m => ({ default: m.OnboardingQuestionnaire })))
 import { supabase, isSupabaseConfigured } from '@/lib/supabase'
 import { getStaffMembers } from '@/services/settingsService'
 import type { Site } from '@/types'
@@ -320,9 +325,11 @@ function AppContent() {
     }
   }, [setIsOnline])
 
-  // Handle navigation
+  // Handle navigation with startTransition for smooth updates
   const handleNavigate = (screen: string) => {
-    setCurrentScreen(screen as Screen)
+    startTransition(() => {
+      setCurrentScreen(screen as Screen)
+    })
   }
 
   // Handle logout
@@ -374,8 +381,8 @@ function AppContent() {
     setStaffMembers([])
   }
 
-  // Render current screen
-  const renderScreen = () => {
+  // Render current screen content (without layout wrapper - MainLayout handles that)
+  const renderScreenContent = () => {
     switch (currentScreen) {
       case 'history':
         return <HistoryScreen onBack={() => setCurrentScreen('home')} />
@@ -388,11 +395,12 @@ function AppContent() {
       case 'menu_engineering':
         return <MenuEngineeringScreen onBack={() => setCurrentScreen('home')} />
       case 'goods_receipt':
-        return <GoodsReceiptScreen onBack={() => setCurrentScreen('home')} />
+        return <GoodsReceiptScreen onBack={() => setCurrentScreen('home')} onNavigate={handleNavigate} />
       case 'venues':
         return <VenuesScreen onBack={() => setCurrentScreen('home')} />
       case 'home':
       default:
+        // Dashboard has its own layout with sidebar - render directly
         return (
           <Dashboard
             onNavigate={handleNavigate}
@@ -400,6 +408,24 @@ function AppContent() {
           />
         )
     }
+  }
+
+  // Wrap content in MainLayout for non-home screens
+  const renderScreen = () => {
+    // Dashboard already has its own layout with sidebar
+    if (currentScreen === 'home') {
+      return renderScreenContent()
+    }
+    
+    // Other screens get wrapped in MainLayout for consistent sidebar on desktop
+    return (
+      <MainLayout 
+        currentScreen={currentScreen} 
+        onNavigate={handleNavigate}
+      >
+        {renderScreenContent()}
+      </MainLayout>
+    )
   }
 
   // Toast styles
@@ -431,17 +457,29 @@ function AppContent() {
     )
   }
 
+  // Loading fallback component
+  const LoadingFallback = () => (
+    <div className="min-h-screen bg-theme-primary flex items-center justify-center">
+      <div className="text-center">
+        <div className="w-10 h-10 border-4 border-emerald-500/30 border-t-emerald-500 rounded-full animate-spin mx-auto mb-3"></div>
+        <p className="text-theme-muted text-sm">Loading...</p>
+      </div>
+    </div>
+  )
+
   // Unauthenticated - show landing
   if (authState === 'unauthenticated') {
     return (
       <>
-        <LandingPage onSignIn={() => {}} onDemoStart={handleDemoStart} />
+        <Suspense fallback={<LoadingFallback />}>
+          <LandingPage onSignIn={() => {}} onDemoStart={handleDemoStart} />
+        </Suspense>
         <Toaster position="top-center" toastOptions={{ style: toastStyle }} />
       </>
     )
   }
 
-  // Demo mode - show dashboard with demo banner
+  // Demo mode - show dashboard with demo banner (no Suspense - screens are direct imports)
   if (authState === 'demo') {
     return (
       <>
@@ -467,17 +505,19 @@ function AppContent() {
   if (authState === 'onboarding' && user) {
     return (
       <>
-        <OnboardingQuestionnaire
-          userId={user.id}
-          userEmail={user.email || ''}
-          onComplete={handleOnboardingComplete}
-        />
+        <Suspense fallback={<LoadingFallback />}>
+          <OnboardingQuestionnaire
+            userId={user.id}
+            userEmail={user.email || ''}
+            onComplete={handleOnboardingComplete}
+          />
+        </Suspense>
         <Toaster position="top-center" toastOptions={{ style: toastStyle }} />
       </>
     )
   }
 
-  // Authenticated - show dashboard
+  // Authenticated - show dashboard (no Suspense - screens are direct imports for instant navigation)
   return (
     <>
       <button

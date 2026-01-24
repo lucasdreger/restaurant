@@ -20,14 +20,14 @@ export function MenuEngineeringScreen({ onBack }: MenuEngineeringScreenProps) {
   }, [items, ingredients]);
 
   return (
-    <div className="min-h-screen bg-background text-foreground transition-colors pb-24 animate-fade-in">
+    <div className="min-h-full bg-theme-primary text-theme-primary transition-colors pb-24 lg:pb-6 animate-fade-in">
        {/* Header */}
        <div className="p-6 md:p-10 max-w-7xl mx-auto space-y-8">
          <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
             <div className="flex items-center gap-4">
               <button 
                 onClick={onBack}
-                className="p-3 rounded-full hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+                className="lg:hidden p-3 rounded-full hover:bg-theme-ghost transition-colors text-theme-secondary hover:text-theme-primary"
               >
                 <ArrowLeft className="w-6 h-6" />
               </button>
