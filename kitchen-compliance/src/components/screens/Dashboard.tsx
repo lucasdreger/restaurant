@@ -1,15 +1,18 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
-import { Plus, Snowflake, AlertTriangle, Mic, Eye, Thermometer } from 'lucide-react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { Plus, Snowflake, AlertTriangle, Eye, Thermometer } from 'lucide-react'
 import { Sidebar, MobileNav } from '@/components/layout/Sidebar'
 import { DashboardHeader, ProgressCard } from '@/components/layout/DashboardHeader'
 import { CoolingSensorCard } from '@/components/cooling/CoolingSensorCard'
 import { StartCoolingModal } from '@/components/cooling/StartCoolingModal'
 import { CloseCoolingModal } from '@/components/cooling/CloseCoolingModal'
 import { FridgeTempModal } from '@/components/fridge/FridgeTempModal'
-import { VoiceButton } from '@/components/voice/VoiceButton'
-import { useAppStore, getActiveSessions, getOverdueSessions, getUnacknowledgedAlerts } from '@/store/useAppStore'
+import { VoiceButton, type VoiceButtonHandle } from '@/components/voice/VoiceButton'
+import { useAppStore, getActiveSessions, getOverdueSessions, getUnacknowledgedAlerts, WAKE_WORD_OPTIONS } from '@/store/useAppStore'
 import { useCoolingWorkflow } from '@/services/coolingService'
 import { useTextToSpeech } from '@/hooks/useVoiceRecognition'
+import { useVoiceCloseFlow } from '@/hooks/useVoiceCloseFlow'
+import { useWakeWord, playWakeSound, getPrimaryWakeWordLabel } from '@/hooks/useWakeWord'
+import { parseVoiceCommand } from '@/lib/voiceCommands'
 import type { FoodItemPreset, VoiceCommand, CloseCoolingData } from '@/types'
 import { toast } from 'sonner'
 
@@ -22,15 +25,22 @@ export function Dashboard({ onNavigate, currentScreen = 'home' }: DashboardProps
   const [isStartModalOpen, setIsStartModalOpen] = useState(false)
   const [closeModalSessionId, setCloseModalSessionId] = useState<string | null>(null)
   const [isFridgeTempModalOpen, setIsFridgeTempModalOpen] = useState(false)
-  
-  const { coolingSessions, currentSite, alerts, acknowledgeAlert } = useAppStore()
+
+  const [wakeWordTriggered, setWakeWordTriggered] = useState(false)
+
+  const { coolingSessions, currentSite, alerts, acknowledgeAlert, staffMembers, settings } = useAppStore()
   const { startCooling, closeCooling, discardCooling, updateSessionStatuses } = useCoolingWorkflow()
   const { speak } = useTextToSpeech()
+
+  const voiceButtonRef = useRef<VoiceButtonHandle>(null)
 
   // Session data
   const activeSessions = useMemo(() => getActiveSessions(coolingSessions), [coolingSessions])
   const overdueSessions = useMemo(() => getOverdueSessions(coolingSessions), [coolingSessions])
   const unacknowledgedAlerts = useMemo(() => getUnacknowledgedAlerts(alerts), [alerts])
+  const sessionReferenceMap = useMemo(() => {
+    return new Map(activeSessions.map((session, index) => [session.id, index + 1]))
+  }, [activeSessions])
   const sessionToClose = useMemo(
     () => coolingSessions.find((s) => s.id === closeModalSessionId) || null,
     [coolingSessions, closeModalSessionId]
@@ -64,6 +74,34 @@ export function Dashboard({ onNavigate, currentScreen = 'home' }: DashboardProps
     setCloseModalSessionId(sessionId)
   }, [])
 
+  const handleVoiceOpenCloseModal = useCallback((sessionId: string) => {
+    setCloseModalSessionId(sessionId)
+  }, [])
+
+  const voiceCloseFlow = useVoiceCloseFlow({
+    sessions: activeSessions,
+    staffMembers,
+    onConfirm: async (sessionId, data) => {
+      await closeCooling(sessionId, data)
+      setCloseModalSessionId(null)
+    },
+    onOpenModal: handleVoiceOpenCloseModal,
+    onCloseModal: () => setCloseModalSessionId(null),
+    speak,
+    onAwaitingInput: () => {
+      // Delay to ensure React has re-rendered with conversationMode=true
+      // and to avoid mic capturing TTS echo
+      setTimeout(() => {
+        console.log('[Dashboard] Flow requesting input - triggering mic')
+        if (voiceButtonRef.current) {
+          voiceButtonRef.current.triggerVoice()
+        }
+      }, 300)
+    }
+  })
+
+  const resumeListeningRef = useRef<() => void>(() => { })
+
   const handleConfirmClose = useCallback(
     async (data: CloseCoolingData) => {
       if (!closeModalSessionId) return
@@ -72,9 +110,10 @@ export function Dashboard({ onNavigate, currentScreen = 'home' }: DashboardProps
         const tempMsg = data.temperature !== undefined ? ` at ${data.temperature}°C` : ''
         speak(`Item moved to fridge${tempMsg}. Well done!`)
         setCloseModalSessionId(null)
+        voiceCloseFlow.reset()
       }
     },
-    [closeModalSessionId, closeCooling, speak]
+    [closeModalSessionId, closeCooling, speak, voiceCloseFlow]
   )
 
   const handleDiscardCooling = useCallback(
@@ -87,6 +126,9 @@ export function Dashboard({ onNavigate, currentScreen = 'home' }: DashboardProps
 
   const handleVoiceCommand = useCallback(
     (command: VoiceCommand) => {
+      console.log('[Dashboard] Handling voice command:', command)
+      setWakeWordTriggered(false)
+
       switch (command.type) {
         case 'start_cooling':
           if (command.item) {
@@ -96,9 +138,7 @@ export function Dashboard({ onNavigate, currentScreen = 'home' }: DashboardProps
           }
           break
         case 'stop_cooling':
-          if (activeSessions.length > 0) {
-            handleOpenCloseModal(activeSessions[0].id)
-          }
+          voiceCloseFlow.startFlow(command.item)
           break
         case 'discard':
           if (activeSessions.length > 0) {
@@ -106,9 +146,90 @@ export function Dashboard({ onNavigate, currentScreen = 'home' }: DashboardProps
           }
           break
       }
+
+      // Resume wake word listening after a short delay (only if not starting a flow)
+      if (settings.wakeWordEnabled && command.type !== 'stop_cooling' && voiceCloseFlow.step === 'idle') {
+        console.log('[Dashboard] Will resume wake word in 1s...')
+        setTimeout(() => {
+          console.log('[Dashboard] Resuming wake word...')
+          resumeListeningRef.current()
+        }, 1000)
+      }
     },
-    [activeSessions, handleStartCooling, handleOpenCloseModal, handleDiscardCooling]
+    [activeSessions, handleStartCooling, handleDiscardCooling, settings.wakeWordEnabled, voiceCloseFlow]
   )
+
+  const handleVoiceEnd = useCallback(() => {
+    setWakeWordTriggered(false)
+
+    // ONLY resume wake word if we are NOT in the middle of a voice flow
+    if (settings.wakeWordEnabled && voiceCloseFlow.step === 'idle') {
+      console.log('[Dashboard] Voice ended, resuming wake word...')
+      resumeListeningRef.current()
+    } else {
+      console.log('[Dashboard] Voice ended, but flow active - skipping wake word resume')
+    }
+  }, [settings.wakeWordEnabled, voiceCloseFlow.step])
+
+  const handleWakeWordDetected = useCallback(() => {
+    console.log('[Dashboard] Wake word detected!')
+    playWakeSound()
+    setWakeWordTriggered(true)
+    // VoiceButton will auto-start thanks to the wakeWordTriggered prop
+  }, [])
+
+  const handleImmediateCommand = useCallback((command: string) => {
+    console.log('[Dashboard] Immediate command after wake word:', command)
+
+    // If we are in the middle of a voice flow, prioritize the flow instead of parsing a new command
+    if (voiceCloseFlow.step !== 'idle') {
+      console.log('[Dashboard] Flow active, passing text to flow handler:', command)
+      voiceCloseFlow.handleTranscript(command)
+      return
+    }
+
+    const parsedCommand = parseVoiceCommand(command)
+    console.log('[Dashboard] Parsed command:', parsedCommand)
+    if (parsedCommand.type !== 'unknown') {
+      console.log('[Dashboard] Executing command:', parsedCommand)
+      handleVoiceCommand(parsedCommand)
+    } else {
+      console.log('[Dashboard] Unknown command, will wait for VoiceButton')
+      speak("Sorry, I didn't understand that. Please try again.")
+
+      // Resume wake word even for unknown commands
+      if (settings.wakeWordEnabled) {
+        setTimeout(() => {
+          console.log('[Dashboard] Resuming wake word after unknown command...')
+          resumeListeningRef.current()
+        }, 2000) // Give user time to hear the feedback
+      }
+    }
+  }, [handleVoiceCommand, speak, settings.wakeWordEnabled, voiceCloseFlow])
+
+  const activeWakeWordPhrases = useMemo(() => {
+    const activeIds = settings.activeWakeWords || ['luma']
+    return activeIds.flatMap(id => {
+      const option = WAKE_WORD_OPTIONS.find(o => o.id === id)
+      return option ? option.phrases : []
+    })
+  }, [settings.activeWakeWords])
+
+  const primaryWakeWordLabel = useMemo(() => {
+    return getPrimaryWakeWordLabel(activeWakeWordPhrases)
+  }, [activeWakeWordPhrases])
+
+  const { isActive: isWakeWordActive, resumeListening } = useWakeWord({
+    onWakeWordDetected: handleWakeWordDetected,
+    onCommandDetected: handleImmediateCommand,
+    enabled: settings.wakeWordEnabled,
+    language: settings.language === 'en' ? 'en-IE' : settings.language,
+    wakeWords: activeWakeWordPhrases,
+  })
+
+  useEffect(() => {
+    resumeListeningRef.current = resumeListening
+  }, [resumeListening])
 
   const handleNavigate = useCallback((screen: string) => {
     onNavigate?.(screen)
@@ -119,7 +240,7 @@ export function Dashboard({ onNavigate, currentScreen = 'home' }: DashboardProps
       toast.info('No new notifications')
       return
     }
-    
+
     // Show alerts in toast and acknowledge them
     unacknowledgedAlerts.forEach((alert, index) => {
       setTimeout(() => {
@@ -136,15 +257,15 @@ export function Dashboard({ onNavigate, currentScreen = 'home' }: DashboardProps
   return (
     <div className="min-h-screen bg-theme-primary flex">
       {/* Desktop Sidebar */}
-      <Sidebar 
-        currentScreen={currentScreen} 
+      <Sidebar
+        currentScreen={currentScreen}
         onNavigate={handleNavigate}
         siteName={currentSite?.name || 'Kitchen Ops'}
       />
 
       {/* Main Content */}
       <div className="flex-1 flex flex-col min-h-screen">
-        <DashboardHeader 
+        <DashboardHeader
           complianceStatus={complianceStatus}
           lastAudit="Today"
           autoLogging={true}
@@ -153,7 +274,7 @@ export function Dashboard({ onNavigate, currentScreen = 'home' }: DashboardProps
         />
 
         <main className="flex-1 p-4 lg:p-6 pb-24 lg:pb-6 overflow-auto">
-          {/* Quick Actions - Log Fridge Temp */}
+          {/* Quick Actions */}
           <section className="mb-6">
             <div className="flex flex-wrap gap-3">
               <button
@@ -168,7 +289,7 @@ export function Dashboard({ onNavigate, currentScreen = 'home' }: DashboardProps
                   <p className="text-xs text-theme-muted">FSAI SC1 Compliance</p>
                 </div>
               </button>
-              
+
               <button
                 onClick={() => setIsStartModalOpen(true)}
                 className="flex items-center gap-3 px-6 py-4 bg-gradient-to-r from-sky-500/20 to-blue-500/20 border-2 border-sky-500/50 rounded-2xl hover:border-sky-400 hover:from-sky-500/30 hover:to-blue-500/30 transition-all group"
@@ -181,6 +302,25 @@ export function Dashboard({ onNavigate, currentScreen = 'home' }: DashboardProps
                   <p className="text-xs text-theme-muted">Track hot food</p>
                 </div>
               </button>
+
+              {/* Voice Commands Button */}
+              <div className="flex items-center gap-3 px-6 py-4 bg-gradient-to-r from-purple-500/20 to-pink-500/20 border-2 border-purple-500/50 rounded-2xl">
+                <VoiceButton
+                  ref={voiceButtonRef}
+                  onCommand={handleVoiceCommand}
+                  onTranscript={voiceCloseFlow.handleTranscript}
+                  onEnd={handleVoiceEnd}
+                  size="sm"
+                  wakeWordActive={isWakeWordActive}
+                  wakeWordTriggered={wakeWordTriggered}
+                  wakeWordLabel={primaryWakeWordLabel}
+                  conversationMode={voiceCloseFlow.step !== 'idle'}
+                />
+                <div className="text-left">
+                  <span className="font-bold text-theme-primary text-lg">Voice Commands</span>
+                  <p className="text-xs text-theme-muted">Say "Start cooling" or "Finish cooling 1"</p>
+                </div>
+              </div>
             </div>
           </section>
 
@@ -195,9 +335,29 @@ export function Dashboard({ onNavigate, currentScreen = 'home' }: DashboardProps
             <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide">
               <ProgressCard
                 title="Cooling Records"
-                value={activeSessions.length > 0 ? 65 : 100}
-                status={activeSessions.length > 0 ? 'in-progress' : 'complete'}
-                subtitle={activeSessions.length > 0 ? `${activeSessions.length} active` : 'All complete'}
+                value={
+                  coolingSessions.length === 0
+                    ? 0
+                    : Math.round(
+                      (coolingSessions.filter(s => s.status === 'closed').length /
+                        coolingSessions.length) *
+                      100
+                    )
+                }
+                status={
+                  coolingSessions.length === 0
+                    ? 'pending'
+                    : coolingSessions.every(s => s.status === 'closed')
+                      ? 'complete'
+                      : 'in-progress'
+                }
+                subtitle={
+                  activeSessions.length > 0
+                    ? `${activeSessions.length} active`
+                    : coolingSessions.length === 0
+                      ? 'No sessions today'
+                      : 'All complete'
+                }
               />
               <ProgressCard
                 title="Mid-Day Logs"
@@ -235,6 +395,7 @@ export function Dashboard({ onNavigate, currentScreen = 'home' }: DashboardProps
                     session={session}
                     onClose={handleOpenCloseModal}
                     onDiscard={handleDiscardCooling}
+                    referenceNumber={sessionReferenceMap.get(session.id)}
                   />
                 ))}
               </div>
@@ -271,6 +432,7 @@ export function Dashboard({ onNavigate, currentScreen = 'home' }: DashboardProps
                       session={session}
                       onClose={handleOpenCloseModal}
                       onDiscard={handleDiscardCooling}
+                      referenceNumber={sessionReferenceMap.get(session.id)}
                     />
                   ))}
               </div>
@@ -296,23 +458,6 @@ export function Dashboard({ onNavigate, currentScreen = 'home' }: DashboardProps
             )}
           </section>
 
-          {/* Voice Command Section */}
-          <section className="bg-theme-card rounded-2xl border border-theme-primary p-6">
-            <div className="flex items-center gap-2 mb-4">
-              <Mic className="w-5 h-5 text-purple-500" />
-              <h2 className="text-sm font-semibold text-theme-secondary uppercase tracking-wide">
-                Voice Commands
-              </h2>
-            </div>
-            <div className="flex flex-col sm:flex-row items-center gap-6">
-              <VoiceButton onCommand={handleVoiceCommand} size="md" />
-              <div className="text-sm text-theme-secondary space-y-2">
-                <p><span className="font-medium text-purple-500">"Start cooling [item]"</span> - Begin tracking</p>
-                <p><span className="font-medium text-emerald-500">"Done"</span> or <span className="font-medium text-emerald-500">"In fridge"</span> - Complete session</p>
-                <p><span className="font-medium text-red-500">"Discard"</span> - Log waste</p>
-              </div>
-            </div>
-          </section>
         </main>
 
         {/* Floating Action Button - Mobile */}
@@ -334,10 +479,16 @@ export function Dashboard({ onNavigate, currentScreen = 'home' }: DashboardProps
         onStart={handleStartCooling}
       />
       <CloseCoolingModal
+        key={`${closeModalSessionId ?? 'none'}-${voiceCloseFlow.staffId ?? 'none'}-${voiceCloseFlow.temperature ?? 'none'}`}
         isOpen={closeModalSessionId !== null}
-        onClose={() => setCloseModalSessionId(null)}
+        onClose={() => {
+          setCloseModalSessionId(null)
+          voiceCloseFlow.reset()
+        }}
         onConfirm={handleConfirmClose}
         session={sessionToClose}
+        preselectedStaffId={voiceCloseFlow.staffId}
+        preselectedTemperature={voiceCloseFlow.temperature ?? null}
       />
       <FridgeTempModal
         isOpen={isFridgeTempModalOpen}

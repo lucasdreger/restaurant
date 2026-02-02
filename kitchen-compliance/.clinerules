@@ -1,0 +1,81 @@
+# ChefVoice Kitchen Compliance - AI Developer Rules
+# 🚀 PRIME DIRECTIVE: OPTIMIZE & EXECUTE
+1. **Context First**: Before coding, always read `.clinerules` (you are here) and checking `package.json` for dependencies.
+2. **Token Efficiency**: Do NOT output large blocks of code if only a few lines changed. Use `multi_replace_file_content` for edits. Do NOT read entire huge files unless necessary; use `grep_search` or `view_file_outline`.
+3. **Plan & Execute**: Always propose a clear plan before modifying code. Validate assumptions (e.g., "does this file exist?") before acting.
+4. **No Hallucinations**: Do not import non-existent libraries. Use what is in `package.json`.
+5. **Seamless Handoff**: Leave the codebase in a state where the next AI can pick up immediately. Add TODOs if a task is incomplete.
+
+---
+
+## 🏗️ Tech Stack (STRICT)
+- **Framework**: React 19 + Vite 7 (TypeScript)
+- **Styling**: **Tailwind CSS v4** (CSS-first config, NO `tailwind.config.js`). Use `@import "tailwindcss";` in CSS.
+- **State**: `zustand` (with `persist` middleware for offline support).
+- **Data**: `@tanstack/react-query` + `@supabase/supabase-js`.
+- **UI Components**: Radix UI primitives + `sonner` (toast) + `lucide-react` (icons).
+- **Features**: `tesseract.js` (OCR), `jspdf` (Reports).
+
+---
+
+## 🔌 MCP & Supabase Workflow (CRITICAL)
+**tool: `mcp-supabase-chefvoice`** is the ONLY way to interact with the database schema/migrations.
+- **NEVER** use `mcp-supabase-sentia`.
+- **Migrations**: Always apply schema changes via migrations.
+  - Path: `kitchen-compliance/supabase/migrations/`
+  - Filename: `YYYYMMDDHHMMSS_description.sql`
+  - Apply: `use_mcp_tool mcp-supabase-chefvoice apply_migration ...`
+- **Schema Helper**: To see current schema, look at the latest migration files or use `mcp-supabase-chefvoice list_tables`.
+- **Type Safety**: If Supabase types are generated, use `Database` interface. If not, define types manually in `src/types`.
+
+---
+
+## 🎨 Design System: "Liquid Glass Executive"
+- **Aesthetic**: High-end, glassmorphism, "Stunning" cards, dark/light mode compatibility.
+- **CSS Variables**: Defined in `src/index.css` (e.g., `--bg-glass`, `--card-stunning`).
+- **Rules**:
+  - Use `className={cn(...)}` for class merging.
+  - Use semantic colors (`bg-theme-primary`, `text-theme-muted`) for theme support.
+  - **Do NOT** use hardcoded hex values; use the CSS variables/Tailwind classes.
+
+---
+
+## 🏛️ Architecture & Patterns
+### 1. Multi-Tenancy (Site ID)
+- **Rule**: Every data table MUST have `site_id` (except system tables).
+- **RLS**: Row Level Security enforces isolation.
+- **Demo Mode**: 
+  - The app supports an unauthenticated "Demo" mode.
+  - **Demo Site ID**: `a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11` (Do NOT fake this UUID).
+  - Logic: If `auth` is null but user is in demo mode, use the Demo Site ID for queries.
+
+### 2. Service Layer (`src/services/`)
+- encapsulate ALL Supabase logic in services.
+- **Return Pattern**: `{ success: true, data: ... }` or `{ success: false, error: ... }`.
+- **Error Handling**: Log detailed errors to console, show user-friendly `toast` messages.
+
+### 3. Images & Storage
+- **Compression**: ALWAYS compress images on the client (`src/lib/imageCompression.ts`) before upload.
+- **Bucket**: `delivery-images` (for receipts/labels).
+
+---
+
+## ⚠️ Common Pitfalls (READ CAREFULLY)
+1. **Foreign Keys**: `received_by_staff_id` might be NULL (if staff isn't in DB yet). always store `received_by_name` as a fallback.
+2. **Tailwind v4**: Do NOT try to find or create `tailwind.config.js`. Theme configuration is in `src/index.css`.
+3. **Offline First**: The app must handle network failures gracefully (use React Query caching).
+
+---
+
+## 🧪 Testing (TDD)
+- **Unit**: `vite.config.ts` handles tests (Vitest).
+- **Pattern**: Write failing test -> Implement -> Refactor.
+- **Location**: `__tests__/` or co-located `*.test.ts`.
+
+---
+
+## 📂 Key File Locations
+- **Rules**: `kitchen-compliance/.clinerules` (This file)
+- **Styles**: `kitchen-compliance/src/index.css` (Theme definition)
+- **State**: `kitchen-compliance/src/store/useAppStore.ts`
+- **Migrations**: `kitchen-compliance/supabase/migrations/`

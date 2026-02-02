@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useAppStore } from '@/store/useAppStore'
 import type { VoiceCommand } from '@/types'
-import { FOOD_ITEM_PRESETS } from '@/types'
+import { parseVoiceCommand } from '@/lib/voiceCommands'
 
 // Use refs for callbacks to avoid recreating recognition on every render
 
@@ -37,70 +37,17 @@ declare global {
 }
 
 // Parse voice input to command
-function parseVoiceCommand(transcript: string): VoiceCommand {
-  const lower = transcript.toLowerCase().trim()
-  
-  // Start cooling commands
-  const startPatterns = [
-    /^(start|begin|new)\s*(cooling|cool)?\s*(.*)$/i,
-    /^cool\s*(.*)$/i,
-    /^cooling\s*(.*)$/i,
-  ]
-  
-  for (const pattern of startPatterns) {
-    const match = lower.match(pattern)
-    if (match) {
-      const itemName = match[match.length - 1]?.trim()
-      // Try to match with presets
-      const preset = FOOD_ITEM_PRESETS.find(
-        (p) =>
-          p.name.toLowerCase().includes(itemName) ||
-          p.id.includes(itemName) ||
-          itemName.includes(p.name.toLowerCase())
-      )
-      return {
-        type: 'start_cooling',
-        item: preset?.name || (itemName || undefined),
-      }
-    }
-  }
-  
-  // Stop/Close cooling commands
-  const stopPatterns = [
-    /^(stop|done|close|finish|in\s*fridge|fridge)\s*(cooling)?/i,
-    /^cooling\s*(done|finished|complete)/i,
-  ]
-  
-  for (const pattern of stopPatterns) {
-    if (pattern.test(lower)) {
-      return { type: 'stop_cooling' }
-    }
-  }
-  
-  // Discard commands
-  const discardPatterns = [
-    /^(discard|throw|bin|trash|waste)/i,
-    /^(throw|toss)\s*(it)?\s*(away|out)?/i,
-  ]
-  
-  for (const pattern of discardPatterns) {
-    if (pattern.test(lower)) {
-      return { type: 'discard' }
-    }
-  }
-  
-  return { type: 'unknown' }
-}
 
 interface UseVoiceRecognitionOptions {
   onCommand?: (command: VoiceCommand) => void
   onTranscript?: (transcript: string) => void
   onError?: (error: string) => void
   language?: string
+  disabled?: boolean // Don't initialize if disabled (for conversation mode)
 }
 
 export function useVoiceRecognition(options: UseVoiceRecognitionOptions = {}) {
-  const { onCommand, onTranscript, onError, language = 'en-IE' } = options
+  const { onCommand, onTranscript, onError, language = 'en-IE', disabled = false } = options
   const [isSupported, setIsSupported] = useState(false)
   const [transcript, setTranscript] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -110,6 +57,7 @@ export function useVoiceRecognition(options: UseVoiceRecognitionOptions = {}) {
   const onCommandRef = useRef(onCommand)
   const onTranscriptRef = useRef(onTranscript)
   const onErrorRef = useRef(onError)
+  const disabledRef = useRef(disabled)
   
   // Keep refs up to date
   useEffect(() => {
@@ -124,7 +72,13 @@ export function useVoiceRecognition(options: UseVoiceRecognitionOptions = {}) {
     onErrorRef.current = onError
   }, [onError])
   
-  const { isListening, setIsListening } = useAppStore()
+  // Keep disabled ref in sync
+  useEffect(() => {
+    disabledRef.current = disabled
+  }, [disabled])
+  
+  // Use local state instead of global to avoid conflicts with other voice hooks
+  const [isListening, setIsListening] = useState(false)
 
   // Check for browser support
   useEffect(() => {
@@ -133,8 +87,24 @@ export function useVoiceRecognition(options: UseVoiceRecognitionOptions = {}) {
     setIsSupported(Boolean(SpeechRecognitionAPI))
   }, [])
 
-  // Initialize recognition - only once when supported
+  // Initialize recognition - only once when supported AND not disabled
+  // IMPORTANT: disabled is in deps so cleanup runs when disabled changes
   useEffect(() => {
+    // If disabled, clean up any existing recognition
+    if (disabled) {
+      if (recognitionRef.current) {
+        console.log('[Voice] Hook disabled - aborting existing recognition')
+        try {
+          recognitionRef.current.abort()
+        } catch (e) {
+          // Ignore
+        }
+        recognitionRef.current = null
+        setIsListening(false)
+      }
+      return
+    }
+    
     if (!isSupported) return
 
     const SpeechRecognitionAPI =
@@ -215,11 +185,18 @@ export function useVoiceRecognition(options: UseVoiceRecognitionOptions = {}) {
 
     return () => {
       recognition.abort()
+      recognitionRef.current = null
     }
-  }, [isSupported, language, setIsListening])
+  }, [isSupported, language, disabled, setIsListening])
 
-  // Start listening
+  // Start listening - check disabled ref to prevent stale closures
   const startListening = useCallback(() => {
+    // Guard: Don't start if hook is disabled
+    if (disabledRef.current) {
+      console.log('[Voice] startListening blocked - hook is disabled')
+      return
+    }
+    
     if (!recognitionRef.current || isListening) return
 
     try {
@@ -273,17 +250,34 @@ export function useTextToSpeech() {
   }, [])
 
   const speak = useCallback(
-    (text: string, options: { rate?: number; pitch?: number } = {}) => {
+    (text: string, options: { rate?: number; pitch?: number; onComplete?: () => void } = {}) => {
       if (!isSupported || isSpeaking) return
 
-      const utterance = new SpeechSynthesisUtterance(text)
-      utterance.rate = options.rate || 1.1 // Slightly faster for kitchen
-      utterance.pitch = options.pitch || 1
+      // Add natural punctuation/pauses for better speech flow
+      const naturalText = text
+        .replace(/(\d+)\s*degrees?/gi, '$1 degrees.') // Pause after temperature
+        .replace(/\bwell done\b/gi, '. Well done!') // Pause before praise
+        .replace(/\bat\b/g, ', at') // Small pause for "at"
+        .replace(/\bby\b/g, ', by') // Small pause for "by"
+        .replace(/\b(closing|starting|finished)\b/gi, '$1,') // Pause after actions
+        .replace(/\bsay\b/gi, '. Say') // Pause before instructions
+        .replace(/confirm to save/gi, 'confirm, to save') // Better flow
+
+      const utterance = new SpeechSynthesisUtterance(naturalText)
+      utterance.rate = options.rate || 0.95 // Slightly slower, more natural
+      utterance.pitch = options.pitch || 1.0
       utterance.lang = 'en-IE'
+      utterance.volume = 0.9 // Slightly softer volume
 
       utterance.onstart = () => setIsSpeaking(true)
-      utterance.onend = () => setIsSpeaking(false)
-      utterance.onerror = () => setIsSpeaking(false)
+      utterance.onend = () => {
+        setIsSpeaking(false)
+        options.onComplete?.()
+      }
+      utterance.onerror = () => {
+        setIsSpeaking(false)
+        options.onComplete?.()
+      }
 
       window.speechSynthesis.speak(utterance)
     },

@@ -3,12 +3,19 @@ import {
   ArrowLeft, Camera, Upload, Scan, Package, Thermometer, 
   User, Building2, CheckCircle, X, Loader2,
   Plus, Trash2, FileText, AlertTriangle, Cpu, Zap, Settings,
-  Snowflake, Sun, Wind, Image, ChevronLeft, ChevronRight, Layers
+  Snowflake, Sun, Wind, Image, ChevronLeft, ChevronRight, Layers,
+  Tag, Beef, Calendar, Hash
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAppStore, type OCRModel } from '@/store/useAppStore'
 import { toast } from 'sonner'
 import { processInvoiceImage, isProviderAvailable, OCR_MODEL_INFO } from '@/services/ocrService'
+import { 
+  createGoodsReceipt, 
+  uploadDeliveryImage, 
+  type ReceiptItemInput,
+} from '@/services/deliveryService'
+import { formatFileSize } from '@/lib/imageCompression'
 
 interface GoodsReceiptScreenProps {
   onBack: () => void
@@ -52,26 +59,37 @@ interface ReceiptItem {
   unit: string
   tempCategory: TempCategory
   temperature?: string
-  pageNumber?: number // Track which page the item came from
+  pageNumber?: number
 }
 
 // Scanned page info
 interface ScannedPage {
   id: string
   imageData: string
+  file: File
   pageNumber: number
   processed: boolean
   itemCount: number
 }
 
+// Protein label info
+interface ProteinLabel {
+  id: string
+  imageData: string
+  file: File
+  productName: string
+  batchNumber: string
+  useByDate: string
+  supplierCode: string
+}
+
 interface ReceiptData {
   supplier: string
-  dnNumber: string // Delivery Note number
+  dnNumber: string
   dnDate: string
   items: ReceiptItem[]
   receivedBy: string
   receivedAt: string
-  // Group temperatures
   ambientTemp: string
   chilledTemp: string
   frozenTemp: string
@@ -92,23 +110,32 @@ const INITIAL_RECEIPT: ReceiptData = {
 }
 
 export function GoodsReceiptScreen({ onBack, onNavigate }: GoodsReceiptScreenProps) {
-  const { staffMembers, settings } = useAppStore()
+  const { staffMembers, settings, currentSite } = useAppStore()
   const [receipt, setReceipt] = useState<ReceiptData>(INITIAL_RECEIPT)
   const [isScanning, setIsScanning] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [submitProgress, setSubmitProgress] = useState<string | null>(null)
   
-  // Multi-page state
+  // Multi-page delivery note state
   const [scannedPages, setScannedPages] = useState<ScannedPage[]>([])
   const [currentPageIndex, setCurrentPageIndex] = useState(0)
   const [processingPageId, setProcessingPageId] = useState<string | null>(null)
+  
+  // Protein labels state
+  const [proteinLabels, setProteinLabels] = useState<ProteinLabel[]>([])
+  const [isCapturingLabel, setIsCapturingLabel] = useState(false)
   
   const [ocrConfidence, setOcrConfidence] = useState<number | null>(null)
   const [ocrResult, setOcrResult] = useState<{ provider: string; model: string } | null>(null)
   const [scanProgress, setScanProgress] = useState<{ progress: number; status: string } | null>(null)
   const [activeCategory, setActiveCategory] = useState<TempCategory | 'all'>('all')
+  
+  // Refs for file inputs
   const fileInputRef = useRef<HTMLInputElement>(null)
   const cameraInputRef = useRef<HTMLInputElement>(null)
   const addPageInputRef = useRef<HTMLInputElement>(null)
+  const labelCameraRef = useRef<HTMLInputElement>(null)
+  const labelFileRef = useRef<HTMLInputElement>(null)
   
   // Get current OCR settings
   const ocrProvider = settings.ocrProvider || 'tesseract'
@@ -118,7 +145,6 @@ export function GoodsReceiptScreen({ onBack, onNavigate }: GoodsReceiptScreenPro
     openrouterApiKey: settings.openrouterApiKey,
   })
   
-  // Get model info
   const modelInfo = OCR_MODEL_INFO[ocrModel]
 
   // Process a single page with OCR
@@ -141,14 +167,12 @@ export function GoodsReceiptScreen({ onBack, onNavigate }: GoodsReceiptScreenPro
       )
       
       if (ocrResultData) {
-        // Convert OCR items to have tempCategory and page number
         const itemsWithCategory: ReceiptItem[] = ocrResultData.items.map(item => ({
           ...item,
           tempCategory: 'chilled' as TempCategory,
           pageNumber: page.pageNumber,
         }))
         
-        // For first page, extract supplier/DN info. For subsequent pages, just add items
         if (page.pageNumber === 1) {
           setReceipt(prev => ({
             ...prev,
@@ -158,14 +182,12 @@ export function GoodsReceiptScreen({ onBack, onNavigate }: GoodsReceiptScreenPro
             items: [...prev.items, ...itemsWithCategory],
           }))
         } else {
-          // Just add items for pages 2+
           setReceipt(prev => ({
             ...prev,
             items: [...prev.items, ...itemsWithCategory],
           }))
         }
         
-        // Mark page as processed and update item count
         setScannedPages(prev => prev.map(p => 
           p.id === page.id 
             ? { ...p, processed: true, itemCount: itemsWithCategory.length }
@@ -187,7 +209,7 @@ export function GoodsReceiptScreen({ onBack, onNavigate }: GoodsReceiptScreenPro
     }
   }
 
-  // Handle file upload (supports multiple files for multi-page)
+  // Handle delivery note file upload
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, isAddingPage = false) => {
     const files = Array.from(e.target.files || [])
     if (files.length === 0) return
@@ -196,18 +218,15 @@ export function GoodsReceiptScreen({ onBack, onNavigate }: GoodsReceiptScreenPro
     
     const startPageNum = isAddingPage ? scannedPages.length + 1 : 1
     
-    // If not adding page, clear existing pages
     if (!isAddingPage) {
       setScannedPages([])
-      setReceipt(INITIAL_RECEIPT)
+      setReceipt(prev => ({ ...prev, items: [] }))
     }
     
-    // Process each file
     for (let i = 0; i < files.length; i++) {
       const file = files[i]
       const pageNum = startPageNum + i
       
-      // Convert to base64 for preview
       const imageData = await new Promise<string>((resolve) => {
         const reader = new FileReader()
         reader.onload = (event) => resolve(event.target?.result as string)
@@ -217,6 +236,7 @@ export function GoodsReceiptScreen({ onBack, onNavigate }: GoodsReceiptScreenPro
       const newPage: ScannedPage = {
         id: crypto.randomUUID(),
         imageData,
+        file,
         pageNumber: pageNum,
         processed: false,
         itemCount: 0,
@@ -225,14 +245,56 @@ export function GoodsReceiptScreen({ onBack, onNavigate }: GoodsReceiptScreenPro
       setScannedPages(prev => [...prev, newPage])
       setCurrentPageIndex(isAddingPage ? scannedPages.length : i)
       
-      // Process the page
       await processPage(newPage, file)
     }
     
     setIsScanning(false)
-    
-    // Reset input
     e.target.value = ''
+  }
+
+  // Handle protein label capture (no OCR, just store)
+  const handleLabelCapture = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || [])
+    if (files.length === 0) return
+
+    setIsCapturingLabel(true)
+    
+    for (const file of files) {
+      const imageData = await new Promise<string>((resolve) => {
+        const reader = new FileReader()
+        reader.onload = (event) => resolve(event.target?.result as string)
+        reader.readAsDataURL(file)
+      })
+      
+      const newLabel: ProteinLabel = {
+        id: crypto.randomUUID(),
+        imageData,
+        file,
+        productName: '',
+        batchNumber: '',
+        useByDate: '',
+        supplierCode: '',
+      }
+      
+      setProteinLabels(prev => [...prev, newLabel])
+    }
+    
+    setIsCapturingLabel(false)
+    toast.success(`${files.length} label(s) captured`)
+    e.target.value = ''
+  }
+
+  // Update protein label field
+  const updateLabel = (id: string, field: keyof ProteinLabel, value: string) => {
+    setProteinLabels(prev => prev.map(label => 
+      label.id === id ? { ...label, [field]: value } : label
+    ))
+  }
+
+  // Remove protein label
+  const removeLabel = (id: string) => {
+    setProteinLabels(prev => prev.filter(label => label.id !== id))
+    toast.success('Label removed')
   }
 
   // Remove a specific page
@@ -240,19 +302,16 @@ export function GoodsReceiptScreen({ onBack, onNavigate }: GoodsReceiptScreenPro
     const pageToRemove = scannedPages.find(p => p.id === pageId)
     if (!pageToRemove) return
     
-    // Remove items from this page
     setReceipt(prev => ({
       ...prev,
       items: prev.items.filter(item => item.pageNumber !== pageToRemove.pageNumber),
     }))
     
-    // Remove the page and renumber remaining pages
     setScannedPages(prev => {
       const filtered = prev.filter(p => p.id !== pageId)
       return filtered.map((p, idx) => ({ ...p, pageNumber: idx + 1 }))
     })
     
-    // Update items with new page numbers
     setReceipt(prev => ({
       ...prev,
       items: prev.items.map(item => {
@@ -263,7 +322,6 @@ export function GoodsReceiptScreen({ onBack, onNavigate }: GoodsReceiptScreenPro
       }),
     }))
     
-    // Adjust current page index
     if (currentPageIndex >= scannedPages.length - 1) {
       setCurrentPageIndex(Math.max(0, scannedPages.length - 2))
     }
@@ -271,21 +329,18 @@ export function GoodsReceiptScreen({ onBack, onNavigate }: GoodsReceiptScreenPro
     toast.success(`Page ${pageToRemove.pageNumber} removed`)
   }
 
-  // Clear all pages
   const clearAllPages = () => {
     setScannedPages([])
-    setReceipt(INITIAL_RECEIPT)
+    setReceipt(prev => ({ ...prev, items: [] }))
     setOcrConfidence(null)
     setOcrResult(null)
     setCurrentPageIndex(0)
   }
 
-  // Update receipt field
   const updateField = (field: keyof ReceiptData, value: string) => {
     setReceipt(prev => ({ ...prev, [field]: value }))
   }
 
-  // Add new item
   const addItem = (category: TempCategory = 'chilled') => {
     const newItem: ReceiptItem = {
       id: crypto.randomUUID(),
@@ -294,12 +349,11 @@ export function GoodsReceiptScreen({ onBack, onNavigate }: GoodsReceiptScreenPro
       unit: 'kg',
       tempCategory: category,
       temperature: '',
-      pageNumber: undefined, // Manual items don't have page number
+      pageNumber: undefined,
     }
     setReceipt(prev => ({ ...prev, items: [...prev.items, newItem] }))
   }
 
-  // Update item
   const updateItem = (id: string, field: keyof ReceiptItem, value: string) => {
     setReceipt(prev => ({
       ...prev,
@@ -309,7 +363,6 @@ export function GoodsReceiptScreen({ onBack, onNavigate }: GoodsReceiptScreenPro
     }))
   }
 
-  // Remove item
   const removeItem = (id: string) => {
     setReceipt(prev => ({
       ...prev,
@@ -317,7 +370,6 @@ export function GoodsReceiptScreen({ onBack, onNavigate }: GoodsReceiptScreenPro
     }))
   }
 
-  // Apply group temperature to all items in category
   const applyGroupTemp = (category: TempCategory, temp: string) => {
     setReceipt(prev => ({
       ...prev,
@@ -332,11 +384,9 @@ export function GoodsReceiptScreen({ onBack, onNavigate }: GoodsReceiptScreenPro
     }
   }
 
-  // Get items by category
   const getItemsByCategory = (category: TempCategory) => 
     receipt.items.filter(item => item.tempCategory === category)
 
-  // Validate form
   const isValid = () => {
     return (
       receipt.supplier.trim() &&
@@ -346,37 +396,131 @@ export function GoodsReceiptScreen({ onBack, onNavigate }: GoodsReceiptScreenPro
     )
   }
 
-  // Submit receipt
+  // Submit receipt with images
   const handleSubmit = async () => {
     if (!isValid()) {
       toast.error('Please fill in all required fields')
       return
     }
 
+    const siteId = currentSite?.id
+    if (!siteId) {
+      toast.error('No site selected')
+      return
+    }
+
     setIsSubmitting(true)
+    setSubmitProgress('Creating receipt...')
     
     try {
-      // TODO: Save to Supabase
-      console.log('📦 Goods Receipt:', receipt)
-      console.log('📄 Pages scanned:', scannedPages.length)
+      // Get staff name
+      const selectedStaff = staffMembers.find(s => s.id === receipt.receivedBy)
+      const receivedByName = selectedStaff?.name || 'Unknown'
+      
+      // Convert items
+      const items: ReceiptItemInput[] = receipt.items.map((item, idx) => ({
+        itemName: item.name,
+        quantity: parseFloat(item.quantity) || 1,
+        unit: item.unit,
+        temperature: item.temperature ? parseFloat(item.temperature) : undefined,
+        temperatureCompliant: item.temperature 
+          ? isTempCompliant(item.temperature, item.tempCategory) ?? true 
+          : true,
+        category: item.tempCategory as any,
+        sortOrder: idx,
+      }))
+
+      // Create the goods receipt
+      const result = await createGoodsReceipt({
+        siteId,
+        supplierName: receipt.supplier,
+        invoiceNumber: receipt.dnNumber || undefined,
+        invoiceDate: receipt.dnDate || undefined,
+        receivedByStaffId: receipt.receivedBy || undefined,
+        receivedByName,
+        receivedAt: receipt.receivedAt || new Date().toISOString(),
+        ocrRawText: ocrResult ? `Provider: ${ocrResult.provider}, Model: ${ocrResult.model}` : undefined,
+        ocrConfidence: ocrConfidence || undefined,
+        notes: receipt.notes || undefined,
+        status: 'completed',
+      }, items)
+
+      if (!result) {
+        throw new Error('Failed to create receipt')
+      }
+
+      const receiptId = result.receipt.id
+      console.log('✅ Receipt created:', receiptId)
+
+      // Upload delivery note pages
+      if (scannedPages.length > 0) {
+        setSubmitProgress(`Uploading ${scannedPages.length} delivery note page(s)...`)
+        
+        for (let i = 0; i < scannedPages.length; i++) {
+          const page = scannedPages[i]
+          setSubmitProgress(`Uploading delivery note page ${i + 1}/${scannedPages.length}...`)
+          
+          const uploaded = await uploadDeliveryImage({
+            receiptId,
+            imageType: 'delivery_note',
+            file: page.file,
+            originalFilename: page.file.name,
+            pageNumber: page.pageNumber,
+            ocrProcessed: page.processed,
+          })
+          
+          if (uploaded) {
+            console.log(`📄 Page ${i + 1} uploaded: ${formatFileSize(uploaded.compressedSizeBytes || 0)}`)
+          }
+        }
+      }
+
+      // Upload protein labels
+      if (proteinLabels.length > 0) {
+        setSubmitProgress(`Uploading ${proteinLabels.length} protein label(s)...`)
+        
+        for (let i = 0; i < proteinLabels.length; i++) {
+          const label = proteinLabels[i]
+          setSubmitProgress(`Uploading protein label ${i + 1}/${proteinLabels.length}...`)
+          
+          const uploaded = await uploadDeliveryImage({
+            receiptId,
+            imageType: 'protein_label',
+            file: label.file,
+            originalFilename: label.file.name,
+            pageNumber: i + 1,
+            productName: label.productName || undefined,
+            batchNumber: label.batchNumber || undefined,
+            useByDate: label.useByDate || undefined,
+            supplierCode: label.supplierCode || undefined,
+            ocrProcessed: false,
+          })
+          
+          if (uploaded) {
+            console.log(`🏷️ Label ${i + 1} uploaded: ${formatFileSize(uploaded.compressedSizeBytes || 0)}`)
+          }
+        }
+      }
       
       toast.success('Goods receipt recorded successfully!')
       
       // Reset form
       setReceipt(INITIAL_RECEIPT)
       setScannedPages([])
+      setProteinLabels([])
       setOcrConfidence(null)
       setOcrResult(null)
+      setCurrentPageIndex(0)
       
     } catch (error) {
       console.error('Submit error:', error)
       toast.error('Failed to save receipt')
     } finally {
       setIsSubmitting(false)
+      setSubmitProgress(null)
     }
   }
 
-  // Check temperature compliance
   const isTempCompliant = (temp: string, category: TempCategory) => {
     const tempNum = parseFloat(temp)
     if (isNaN(tempNum)) return null
@@ -384,12 +528,10 @@ export function GoodsReceiptScreen({ onBack, onNavigate }: GoodsReceiptScreenPro
     return category === 'frozen' ? tempNum <= maxTemp : tempNum <= maxTemp
   }
 
-  // Get filtered items based on active category
   const filteredItems = activeCategory === 'all' 
     ? receipt.items 
     : receipt.items.filter(item => item.tempCategory === activeCategory)
 
-  // Current page for display
   const currentPage = scannedPages[currentPageIndex]
 
   return (
@@ -409,7 +551,7 @@ export function GoodsReceiptScreen({ onBack, onNavigate }: GoodsReceiptScreenPro
               Goods Receipt
             </h1>
             <p className="text-sm text-theme-muted">
-              Scan delivery note & record intake
+              Scan delivery note & protein labels for traceability
             </p>
           </div>
         </div>
@@ -429,7 +571,6 @@ export function GoodsReceiptScreen({ onBack, onNavigate }: GoodsReceiptScreenPro
               )}
             </h2>
             
-            {/* OCR Provider Badge with Settings link */}
             <div className="flex items-center gap-2">
               <div className={cn(
                 "flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium",
@@ -463,9 +604,7 @@ export function GoodsReceiptScreen({ onBack, onNavigate }: GoodsReceiptScreenPro
           </div>
 
           {scannedPages.length === 0 ? (
-            // Initial scan buttons
             <div className="flex flex-col sm:flex-row gap-4">
-              {/* Camera capture */}
               <button
                 onClick={() => cameraInputRef.current?.click()}
                 disabled={isScanning}
@@ -478,7 +617,6 @@ export function GoodsReceiptScreen({ onBack, onNavigate }: GoodsReceiptScreenPro
                 <span className="text-sm text-theme-muted">Use camera to scan DN</span>
               </button>
 
-              {/* File upload */}
               <button
                 onClick={() => fileInputRef.current?.click()}
                 disabled={isScanning}
@@ -491,7 +629,6 @@ export function GoodsReceiptScreen({ onBack, onNavigate }: GoodsReceiptScreenPro
                 <span className="text-sm text-theme-muted">Select one or more images</span>
               </button>
 
-              {/* Hidden inputs */}
               <input
                 ref={cameraInputRef}
                 type="file"
@@ -510,9 +647,7 @@ export function GoodsReceiptScreen({ onBack, onNavigate }: GoodsReceiptScreenPro
               />
             </div>
           ) : (
-            // Multi-page viewer
             <div className="space-y-4">
-              {/* Page thumbnails strip */}
               <div className="flex items-center gap-2 overflow-x-auto pb-2">
                 {scannedPages.map((page, idx) => (
                   <button
@@ -546,7 +681,6 @@ export function GoodsReceiptScreen({ onBack, onNavigate }: GoodsReceiptScreenPro
                   </button>
                 ))}
                 
-                {/* Add page button */}
                 <button
                   onClick={() => addPageInputRef.current?.click()}
                   disabled={isScanning}
@@ -566,7 +700,6 @@ export function GoodsReceiptScreen({ onBack, onNavigate }: GoodsReceiptScreenPro
                 />
               </div>
 
-              {/* Current page preview */}
               {currentPage && (
                 <div className="relative">
                   <img
@@ -575,7 +708,6 @@ export function GoodsReceiptScreen({ onBack, onNavigate }: GoodsReceiptScreenPro
                     className="w-full max-h-64 object-contain rounded-xl bg-black/20"
                   />
                   
-                  {/* Page navigation */}
                   {scannedPages.length > 1 && (
                     <>
                       <button
@@ -595,7 +727,6 @@ export function GoodsReceiptScreen({ onBack, onNavigate }: GoodsReceiptScreenPro
                     </>
                   )}
                   
-                  {/* Remove page button */}
                   <button
                     onClick={() => removePage(currentPage.id)}
                     className="absolute top-2 right-2 p-2 bg-red-500/80 rounded-lg hover:bg-red-500 transition-colors"
@@ -604,7 +735,6 @@ export function GoodsReceiptScreen({ onBack, onNavigate }: GoodsReceiptScreenPro
                     <X className="w-4 h-4 text-white" />
                   </button>
                   
-                  {/* Page info badge */}
                   <div className="absolute top-2 left-2 flex items-center gap-2">
                     <span className="px-2 py-1 bg-black/70 text-white text-xs rounded-lg flex items-center gap-1">
                       <Layers className="w-3 h-3" />
@@ -619,7 +749,6 @@ export function GoodsReceiptScreen({ onBack, onNavigate }: GoodsReceiptScreenPro
                 </div>
               )}
 
-              {/* OCR confidence indicator */}
               {ocrConfidence !== null && ocrResult && (
                 <div className={cn(
                   "flex items-center gap-2 px-4 py-2 rounded-lg text-sm",
@@ -639,7 +768,6 @@ export function GoodsReceiptScreen({ onBack, onNavigate }: GoodsReceiptScreenPro
                 </div>
               )}
 
-              {/* Action buttons */}
               <div className="flex gap-2">
                 <button
                   onClick={() => addPageInputRef.current?.click()}
@@ -679,7 +807,6 @@ export function GoodsReceiptScreen({ onBack, onNavigate }: GoodsReceiptScreenPro
             </div>
           )}
           
-          {/* Provider info / API key warning */}
           {scannedPages.length === 0 && (
             <div className="mt-4 p-3 bg-theme-ghost rounded-lg text-xs text-theme-muted">
               {!isOcrConfigured && ocrProvider !== 'tesseract' ? (
@@ -706,6 +833,192 @@ export function GoodsReceiptScreen({ onBack, onNavigate }: GoodsReceiptScreenPro
                   </span>
                 </p>
               )}
+            </div>
+          )}
+        </div>
+
+        {/* Protein Label Scanner Section - NEW */}
+        <div className="bg-theme-card rounded-2xl border border-theme-primary p-6">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-semibold flex items-center gap-2 text-theme-primary">
+              <Tag className="w-5 h-5 text-rose-500" />
+              Protein Traceability Labels
+              {proteinLabels.length > 0 && (
+                <span className="text-sm font-normal text-theme-muted ml-2">
+                  ({proteinLabels.length} {proteinLabels.length === 1 ? 'label' : 'labels'})
+                </span>
+              )}
+            </h2>
+            <span className="text-xs bg-rose-500/20 text-rose-400 px-2 py-1 rounded-full">
+              For Traceability
+            </span>
+          </div>
+
+          <p className="text-sm text-theme-muted mb-4">
+            Capture photos of protein labels (beef, poultry, seafood) for FSAI traceability compliance. 
+            No OCR required - just scan and optionally add batch details.
+          </p>
+
+          {/* Label capture buttons */}
+          <div className="flex flex-col sm:flex-row gap-4 mb-4">
+            <button
+              onClick={() => labelCameraRef.current?.click()}
+              disabled={isCapturingLabel}
+              className="flex-1 p-4 bg-theme-secondary rounded-xl border-2 border-dashed border-theme-primary hover:border-rose-500 transition-colors flex items-center gap-3"
+            >
+              <div className="w-12 h-12 rounded-full bg-rose-500/20 flex items-center justify-center flex-shrink-0">
+                <Camera className="w-6 h-6 text-rose-500" />
+              </div>
+              <div className="text-left">
+                <span className="font-medium text-theme-primary block">Take Photo</span>
+                <span className="text-sm text-theme-muted">Capture label with camera</span>
+              </div>
+            </button>
+
+            <button
+              onClick={() => labelFileRef.current?.click()}
+              disabled={isCapturingLabel}
+              className="flex-1 p-4 bg-theme-secondary rounded-xl border-2 border-dashed border-theme-primary hover:border-rose-500 transition-colors flex items-center gap-3"
+            >
+              <div className="w-12 h-12 rounded-full bg-rose-500/20 flex items-center justify-center flex-shrink-0">
+                <Upload className="w-6 h-6 text-rose-500" />
+              </div>
+              <div className="text-left">
+                <span className="font-medium text-theme-primary block">Upload</span>
+                <span className="text-sm text-theme-muted">Select label image(s)</span>
+              </div>
+            </button>
+
+            <input
+              ref={labelCameraRef}
+              type="file"
+              accept="image/*"
+              capture="environment"
+              onChange={handleLabelCapture}
+              className="hidden"
+            />
+            <input
+              ref={labelFileRef}
+              type="file"
+              accept="image/*"
+              multiple
+              onChange={handleLabelCapture}
+              className="hidden"
+            />
+          </div>
+
+          {isCapturingLabel && (
+            <div className="flex items-center justify-center gap-2 py-4">
+              <Loader2 className="w-5 h-5 animate-spin text-rose-500" />
+              <span className="text-theme-muted">Processing...</span>
+            </div>
+          )}
+
+          {/* Display captured labels */}
+          {proteinLabels.length > 0 && (
+            <div className="space-y-4">
+              {proteinLabels.map((label, idx) => (
+                <div 
+                  key={label.id}
+                  className="p-4 bg-rose-500/5 border border-rose-500/30 rounded-xl"
+                >
+                  <div className="flex gap-4">
+                    {/* Label image preview */}
+                    <div className="relative flex-shrink-0">
+                      <img
+                        src={label.imageData}
+                        alt={`Label ${idx + 1}`}
+                        className="w-24 h-24 object-cover rounded-lg"
+                      />
+                      <div className="absolute -top-2 -left-2 w-6 h-6 bg-rose-500 text-white text-xs rounded-full flex items-center justify-center font-bold">
+                        {idx + 1}
+                      </div>
+                    </div>
+
+                    {/* Label metadata fields */}
+                    <div className="flex-1 grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-xs text-theme-muted flex items-center gap-1 mb-1">
+                          <Beef className="w-3 h-3" />
+                          Product Name
+                        </label>
+                        <input
+                          type="text"
+                          value={label.productName}
+                          onChange={(e) => updateLabel(label.id, 'productName', e.target.value)}
+                          placeholder="e.g., Beef Striploin"
+                          className="w-full px-3 py-2 bg-theme-card border border-theme-primary rounded-lg text-sm focus:outline-none focus:border-rose-500"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="text-xs text-theme-muted flex items-center gap-1 mb-1">
+                          <Hash className="w-3 h-3" />
+                          Batch/Lot Number
+                        </label>
+                        <input
+                          type="text"
+                          value={label.batchNumber}
+                          onChange={(e) => updateLabel(label.id, 'batchNumber', e.target.value)}
+                          placeholder="e.g., LOT-2026-001"
+                          className="w-full px-3 py-2 bg-theme-card border border-theme-primary rounded-lg text-sm focus:outline-none focus:border-rose-500"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="text-xs text-theme-muted flex items-center gap-1 mb-1">
+                          <Calendar className="w-3 h-3" />
+                          Use By Date
+                        </label>
+                        <input
+                          type="date"
+                          value={label.useByDate}
+                          onChange={(e) => updateLabel(label.id, 'useByDate', e.target.value)}
+                          className="w-full px-3 py-2 bg-theme-card border border-theme-primary rounded-lg text-sm focus:outline-none focus:border-rose-500"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="text-xs text-theme-muted flex items-center gap-1 mb-1">
+                          <Tag className="w-3 h-3" />
+                          Supplier Code
+                        </label>
+                        <input
+                          type="text"
+                          value={label.supplierCode}
+                          onChange={(e) => updateLabel(label.id, 'supplierCode', e.target.value)}
+                          placeholder="e.g., SUP-123"
+                          className="w-full px-3 py-2 bg-theme-card border border-theme-primary rounded-lg text-sm focus:outline-none focus:border-rose-500"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Remove button */}
+                    <button
+                      onClick={() => removeLabel(label.id)}
+                      className="p-2 h-fit text-red-400 hover:bg-red-500/20 rounded-lg transition-colors"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+
+              <button
+                onClick={() => labelCameraRef.current?.click()}
+                className="w-full py-2 bg-rose-500/20 text-rose-500 rounded-lg text-sm font-medium hover:bg-rose-500/30 transition-colors flex items-center justify-center gap-2"
+              >
+                <Plus className="w-4 h-4" />
+                Add Another Label
+              </button>
+            </div>
+          )}
+
+          {proteinLabels.length === 0 && !isCapturingLabel && (
+            <div className="text-center py-6 text-theme-muted">
+              <Beef className="w-10 h-10 mx-auto mb-2 opacity-50" />
+              <p className="text-sm">No protein labels captured yet</p>
+              <p className="text-xs">Optional: Add labels for meat, poultry, or seafood traceability</p>
             </div>
           )}
         </div>
@@ -763,107 +1076,54 @@ export function GoodsReceiptScreen({ onBack, onNavigate }: GoodsReceiptScreenPro
           </p>
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            {/* Ambient */}
-            <div className={cn(
-              "p-4 rounded-xl border-2 transition-all",
-              getItemsByCategory('ambient').length > 0 
-                ? "border-amber-500/50 bg-amber-500/5"
-                : "border-theme-primary bg-theme-secondary opacity-50"
-            )}>
-              <div className="flex items-center gap-2 mb-3">
-                <Sun className="w-5 h-5 text-amber-500" />
-                <span className="font-semibold text-amber-500">Ambient</span>
-                <span className="text-xs bg-amber-500/20 text-amber-500 px-2 py-0.5 rounded-full ml-auto">
-                  {getItemsByCategory('ambient').length} items
-                </span>
-              </div>
-              <p className="text-xs text-theme-muted mb-2">Room temperature items</p>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={receipt.ambientTemp}
-                  onChange={(e) => updateField('ambientTemp', e.target.value)}
-                  placeholder="°C"
-                  disabled={getItemsByCategory('ambient').length === 0}
-                  className="flex-1 px-3 py-2 bg-theme-card border border-theme-primary rounded-lg text-sm focus:outline-none focus:border-amber-500"
-                />
-                <button
-                  onClick={() => applyGroupTemp('ambient', receipt.ambientTemp)}
-                  disabled={!receipt.ambientTemp || getItemsByCategory('ambient').length === 0}
-                  className="px-3 py-2 bg-amber-500 text-white rounded-lg text-sm font-medium disabled:opacity-50"
+            {(['ambient', 'chilled', 'frozen'] as TempCategory[]).map(cat => {
+              const config = TEMP_CATEGORIES[cat]
+              const Icon = config.icon
+              const count = getItemsByCategory(cat).length
+              const tempField = `${cat}Temp` as 'ambientTemp' | 'chilledTemp' | 'frozenTemp'
+              
+              return (
+                <div 
+                  key={cat}
+                  className={cn(
+                    "p-4 rounded-xl border-2 transition-all",
+                    count > 0 
+                      ? `border-${cat === 'ambient' ? 'amber' : cat === 'chilled' ? 'cyan' : 'blue'}-500/50 ${config.bgColor}`
+                      : "border-theme-primary bg-theme-secondary opacity-50"
+                  )}
                 >
-                  Apply
-                </button>
-              </div>
-            </div>
-
-            {/* Chilled */}
-            <div className={cn(
-              "p-4 rounded-xl border-2 transition-all",
-              getItemsByCategory('chilled').length > 0 
-                ? "border-cyan-500/50 bg-cyan-500/5"
-                : "border-theme-primary bg-theme-secondary opacity-50"
-            )}>
-              <div className="flex items-center gap-2 mb-3">
-                <Wind className="w-5 h-5 text-cyan-500" />
-                <span className="font-semibold text-cyan-500">Chilled</span>
-                <span className="text-xs bg-cyan-500/20 text-cyan-500 px-2 py-0.5 rounded-full ml-auto">
-                  {getItemsByCategory('chilled').length} items
-                </span>
-              </div>
-              <p className="text-xs text-theme-muted mb-2">0°C to 5°C (FSAI limit)</p>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={receipt.chilledTemp}
-                  onChange={(e) => updateField('chilledTemp', e.target.value)}
-                  placeholder="°C"
-                  disabled={getItemsByCategory('chilled').length === 0}
-                  className="flex-1 px-3 py-2 bg-theme-card border border-theme-primary rounded-lg text-sm focus:outline-none focus:border-cyan-500"
-                />
-                <button
-                  onClick={() => applyGroupTemp('chilled', receipt.chilledTemp)}
-                  disabled={!receipt.chilledTemp || getItemsByCategory('chilled').length === 0}
-                  className="px-3 py-2 bg-cyan-500 text-white rounded-lg text-sm font-medium disabled:opacity-50"
-                >
-                  Apply
-                </button>
-              </div>
-            </div>
-
-            {/* Frozen */}
-            <div className={cn(
-              "p-4 rounded-xl border-2 transition-all",
-              getItemsByCategory('frozen').length > 0 
-                ? "border-blue-500/50 bg-blue-500/5"
-                : "border-theme-primary bg-theme-secondary opacity-50"
-            )}>
-              <div className="flex items-center gap-2 mb-3">
-                <Snowflake className="w-5 h-5 text-blue-500" />
-                <span className="font-semibold text-blue-500">Frozen</span>
-                <span className="text-xs bg-blue-500/20 text-blue-500 px-2 py-0.5 rounded-full ml-auto">
-                  {getItemsByCategory('frozen').length} items
-                </span>
-              </div>
-              <p className="text-xs text-theme-muted mb-2">-18°C or below (FSAI limit)</p>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={receipt.frozenTemp}
-                  onChange={(e) => updateField('frozenTemp', e.target.value)}
-                  placeholder="°C"
-                  disabled={getItemsByCategory('frozen').length === 0}
-                  className="flex-1 px-3 py-2 bg-theme-card border border-theme-primary rounded-lg text-sm focus:outline-none focus:border-blue-500"
-                />
-                <button
-                  onClick={() => applyGroupTemp('frozen', receipt.frozenTemp)}
-                  disabled={!receipt.frozenTemp || getItemsByCategory('frozen').length === 0}
-                  className="px-3 py-2 bg-blue-500 text-white rounded-lg text-sm font-medium disabled:opacity-50"
-                >
-                  Apply
-                </button>
-              </div>
-            </div>
+                  <div className="flex items-center gap-2 mb-3">
+                    <Icon className={`w-5 h-5 ${config.color}`} />
+                    <span className={`font-semibold ${config.color}`}>{config.label}</span>
+                    <span className={`text-xs ${config.bgColor} ${config.color} px-2 py-0.5 rounded-full ml-auto`}>
+                      {count} items
+                    </span>
+                  </div>
+                  <p className="text-xs text-theme-muted mb-2">{config.range}</p>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={receipt[tempField]}
+                      onChange={(e) => updateField(tempField, e.target.value)}
+                      placeholder="°C"
+                      disabled={count === 0}
+                      className="flex-1 px-3 py-2 bg-theme-card border border-theme-primary rounded-lg text-sm focus:outline-none focus:border-emerald-500"
+                    />
+                    <button
+                      onClick={() => applyGroupTemp(cat, receipt[tempField])}
+                      disabled={!receipt[tempField] || count === 0}
+                      className={cn(
+                        "px-3 py-2 text-white rounded-lg text-sm font-medium disabled:opacity-50",
+                        cat === 'ambient' ? 'bg-amber-500' :
+                        cat === 'chilled' ? 'bg-cyan-500' : 'bg-blue-500'
+                      )}
+                    >
+                      Apply
+                    </button>
+                  </div>
+                </div>
+              )
+            })}
           </div>
         </div>
 
@@ -875,7 +1135,6 @@ export function GoodsReceiptScreen({ onBack, onNavigate }: GoodsReceiptScreenPro
               Items Received
             </h2>
             <div className="flex items-center gap-2">
-              {/* Category filter tabs */}
               <div className="flex bg-theme-secondary rounded-lg p-1">
                 <button
                   onClick={() => setActiveCategory('all')}
@@ -909,32 +1168,26 @@ export function GoodsReceiptScreen({ onBack, onNavigate }: GoodsReceiptScreenPro
             </div>
           </div>
 
-          {/* Add item buttons */}
           <div className="flex flex-wrap gap-2 mb-4">
-            <button
-              onClick={() => addItem('ambient')}
-              className="flex items-center gap-2 px-3 py-2 bg-amber-500/10 text-amber-500 rounded-lg hover:bg-amber-500/20 transition-colors text-sm font-medium"
-            >
-              <Plus className="w-4 h-4" />
-              <Sun className="w-4 h-4" />
-              Ambient
-            </button>
-            <button
-              onClick={() => addItem('chilled')}
-              className="flex items-center gap-2 px-3 py-2 bg-cyan-500/10 text-cyan-500 rounded-lg hover:bg-cyan-500/20 transition-colors text-sm font-medium"
-            >
-              <Plus className="w-4 h-4" />
-              <Wind className="w-4 h-4" />
-              Chilled
-            </button>
-            <button
-              onClick={() => addItem('frozen')}
-              className="flex items-center gap-2 px-3 py-2 bg-blue-500/10 text-blue-500 rounded-lg hover:bg-blue-500/20 transition-colors text-sm font-medium"
-            >
-              <Plus className="w-4 h-4" />
-              <Snowflake className="w-4 h-4" />
-              Frozen
-            </button>
+            {(['ambient', 'chilled', 'frozen'] as TempCategory[]).map(cat => {
+              const config = TEMP_CATEGORIES[cat]
+              const Icon = config.icon
+              return (
+                <button
+                  key={cat}
+                  onClick={() => addItem(cat)}
+                  className={cn(
+                    "flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors",
+                    config.bgColor, config.color,
+                    `hover:${config.bgColor.replace('/10', '/20')}`
+                  )}
+                >
+                  <Plus className="w-4 h-4" />
+                  <Icon className="w-4 h-4" />
+                  {config.label}
+                </button>
+              )
+            })}
           </div>
 
           {receipt.items.length === 0 ? (
@@ -945,7 +1198,7 @@ export function GoodsReceiptScreen({ onBack, onNavigate }: GoodsReceiptScreenPro
             </div>
           ) : (
             <div className="space-y-3">
-              {filteredItems.map((item, idx) => {
+              {filteredItems.map((item) => {
                 const catConfig = TEMP_CATEGORIES[item.tempCategory]
                 const TempIcon = catConfig.icon
                 return (
@@ -1121,6 +1374,24 @@ export function GoodsReceiptScreen({ onBack, onNavigate }: GoodsReceiptScreenPro
           </div>
         </div>
 
+        {/* Summary before submit */}
+        {(scannedPages.length > 0 || proteinLabels.length > 0) && (
+          <div className="bg-theme-ghost rounded-xl p-4 flex items-center gap-4 text-sm">
+            <div className="flex items-center gap-2">
+              <FileText className="w-4 h-4 text-cyan-500" />
+              <span className="text-theme-muted">{scannedPages.length} delivery note page(s)</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <Tag className="w-4 h-4 text-rose-500" />
+              <span className="text-theme-muted">{proteinLabels.length} protein label(s)</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <Package className="w-4 h-4 text-emerald-500" />
+              <span className="text-theme-muted">{receipt.items.length} item(s)</span>
+            </div>
+          </div>
+        )}
+
         {/* Submit Button */}
         <div className="flex gap-4">
           <button
@@ -1142,15 +1413,15 @@ export function GoodsReceiptScreen({ onBack, onNavigate }: GoodsReceiptScreenPro
             {isSubmitting ? (
               <>
                 <Loader2 className="w-5 h-5 animate-spin" />
-                Saving...
+                {submitProgress || 'Saving...'}
               </>
             ) : (
               <>
                 <CheckCircle className="w-5 h-5" />
                 Record Receipt
-                {scannedPages.length > 1 && (
+                {(scannedPages.length > 0 || proteinLabels.length > 0) && (
                   <span className="text-sm font-normal opacity-80">
-                    ({scannedPages.length} pages)
+                    ({scannedPages.length + proteinLabels.length} images)
                   </span>
                 )}
               </>

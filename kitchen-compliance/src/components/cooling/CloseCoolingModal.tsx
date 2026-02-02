@@ -10,6 +10,8 @@ interface CloseCoolingModalProps {
   onClose: () => void
   onConfirm: (data: CloseCoolingData) => void
   session: CoolingSession | null
+  preselectedStaffId?: string | null
+  preselectedTemperature?: number | null
 }
 
 // Quick temperature presets (common values)
@@ -20,40 +22,69 @@ export function CloseCoolingModal({
   onClose,
   onConfirm,
   session,
+  preselectedStaffId,
+  preselectedTemperature,
 }: CloseCoolingModalProps) {
   const { staffMembers } = useAppStore()
-  const [temperature, setTemperature] = useState<number | undefined>(undefined)
-  const [customTemp, setCustomTemp] = useState('')
-  const [selectedStaff, setSelectedStaff] = useState<StaffMember | null>(null)
-  const [showCustomTemp, setShowCustomTemp] = useState(false)
+  const initialPreselectedTemperature = preselectedTemperature ?? null
+  const initialIsPreset =
+    initialPreselectedTemperature !== null && TEMP_PRESETS.includes(initialPreselectedTemperature)
+  const [temperature, setTemperature] = useState<number | undefined>(() =>
+    initialIsPreset ? initialPreselectedTemperature ?? undefined : undefined
+  )
+  const [customTemp, setCustomTemp] = useState(() =>
+    !initialIsPreset && initialPreselectedTemperature !== null
+      ? String(initialPreselectedTemperature)
+      : ''
+  )
+  const [selectedStaff, setSelectedStaff] = useState<StaffMember | null>(() => {
+    if (!preselectedStaffId) return null
+    return staffMembers.find((staff) => staff.id === preselectedStaffId) || null
+  })
+  const [showCustomTemp, setShowCustomTemp] = useState(() =>
+    !initialIsPreset && initialPreselectedTemperature !== null
+  )
+  const [finalConfirmationRequired, setFinalConfirmationRequired] = useState(() =>
+    Boolean(preselectedStaffId || initialPreselectedTemperature !== null)
+  )
 
   // Filter active staff members
-  const activeStaff = useMemo(() => 
-    staffMembers.filter(s => s.active), 
+  const activeStaff = useMemo(() =>
+    staffMembers.filter(s => s.active),
     [staffMembers]
   )
+
+  const effectiveSelectedStaff = useMemo(() => {
+    if (selectedStaff) return selectedStaff
+    if (!preselectedStaffId) return null
+    return staffMembers.find((staff) => staff.id === preselectedStaffId) || null
+  }, [preselectedStaffId, selectedStaff, staffMembers])
+
+  const isPreselectedStaff = !selectedStaff && preselectedStaffId === effectiveSelectedStaff?.id
+  const isPreselectedTemp = temperature === undefined && customTemp === '' && preselectedTemperature !== null
+
+  const resetForm = useCallback(() => {
+    setTemperature(undefined)
+    setCustomTemp('')
+    setSelectedStaff(null)
+    setShowCustomTemp(false)
+    setFinalConfirmationRequired(false)
+  }, [])
 
   const handleConfirm = useCallback(() => {
     const finalTemp = showCustomTemp && customTemp ? parseFloat(customTemp) : temperature
     onConfirm({
       temperature: finalTemp,
-      staffId: selectedStaff?.id,
-      staffName: selectedStaff?.name,
+      staffId: effectiveSelectedStaff?.id,
+      staffName: effectiveSelectedStaff?.name,
     })
-    // Reset form
-    setTemperature(undefined)
-    setCustomTemp('')
-    setSelectedStaff(null)
-    setShowCustomTemp(false)
-  }, [temperature, customTemp, selectedStaff, showCustomTemp, onConfirm])
+    resetForm()
+  }, [temperature, customTemp, effectiveSelectedStaff, showCustomTemp, onConfirm, resetForm])
 
   const handleClose = useCallback(() => {
-    setTemperature(undefined)
-    setCustomTemp('')
-    setSelectedStaff(null)
-    setShowCustomTemp(false)
+    resetForm()
     onClose()
-  }, [onClose])
+  }, [onClose, resetForm])
 
   if (!isOpen || !session) return null
 
@@ -61,7 +92,7 @@ export function CloseCoolingModal({
   const elapsedMinutes = Math.floor(elapsedSeconds / 60)
   const isOverdue = session.status === 'overdue'
   const isWarning = session.status === 'warning'
-  
+
   // Check if temperature is compliant (<8°C)
   const selectedTemp = showCustomTemp && customTemp ? parseFloat(customTemp) : temperature
   const isTempCompliant = selectedTemp !== undefined && selectedTemp < 8
@@ -101,9 +132,9 @@ export function CloseCoolingModal({
           {/* Session Info */}
           <div className={cn(
             'p-4 rounded-xl border',
-            isOverdue ? 'bg-red-500/10 border-red-500/30' : 
-            isWarning ? 'bg-amber-500/10 border-amber-500/30' :
-            'bg-theme-secondary border-theme-primary'
+            isOverdue ? 'bg-red-500/10 border-red-500/30' :
+              isWarning ? 'bg-amber-500/10 border-amber-500/30' :
+                'bg-theme-secondary border-theme-primary'
           )}>
             <div className="flex items-center justify-between">
               <div>
@@ -135,11 +166,18 @@ export function CloseCoolingModal({
 
           {/* Staff Selection - Tile-based */}
           <div>
-            <label className="flex items-center gap-2 text-sm font-medium text-theme-secondary mb-3">
-              <User className="w-4 h-4 text-purple-400" />
-              Who's recording?
-            </label>
-            
+            <div className="flex items-center justify-between mb-3">
+              <label className="flex items-center gap-2 text-sm font-medium text-theme-secondary">
+                <User className="w-4 h-4 text-purple-400" />
+                Who's recording?
+              </label>
+              {isPreselectedStaff && (
+                <span className="text-[10px] uppercase tracking-wider font-bold text-purple-400 animate-pulse bg-purple-500/10 px-2 py-0.5 rounded-full border border-purple-500/20">
+                  Captured by voice
+                </span>
+              )}
+            </div>
+
             {activeStaff.length > 0 ? (
               <div className="grid grid-cols-3 gap-2">
                 {activeStaff.map((staff) => (
@@ -148,13 +186,26 @@ export function CloseCoolingModal({
                     onClick={() => setSelectedStaff(staff)}
                     className={cn(
                       'p-4 rounded-xl transition-all flex flex-col items-center justify-center gap-1 min-h-[80px] touch-manipulation',
-                      selectedStaff?.id === staff.id
-                        ? 'bg-purple-500 text-white ring-2 ring-purple-400'
+                      effectiveSelectedStaff?.id === staff.id
+                        ? cn(
+                          'bg-purple-500 text-white ring-2 ring-purple-400 shadow-lg shadow-purple-500/30',
+                          isPreselectedStaff && 'animate-pulse'
+                        )
                         : 'bg-theme-secondary text-theme-secondary hover:bg-theme-hover active:scale-95'
                     )}
                   >
                     <span className="text-2xl font-bold">{staff.initials}</span>
                     <span className="text-xs truncate max-w-full">{staff.name}</span>
+                    {staff.staff_code && (
+                      <span className={cn(
+                        'mt-1 rounded-full px-2 py-0.5 text-[10px] font-semibold',
+                        effectiveSelectedStaff?.id === staff.id
+                          ? 'bg-white/20 text-white'
+                          : 'bg-theme-hover text-theme-muted'
+                      )}>
+                        Code {staff.staff_code}
+                      </span>
+                    )}
                   </button>
                 ))}
               </div>
@@ -168,11 +219,17 @@ export function CloseCoolingModal({
 
           {/* Temperature Input */}
           <div>
-            <label className="flex items-center gap-2 text-sm font-medium text-theme-secondary mb-3">
-              <Thermometer className="w-4 h-4 text-sky-400" />
-              Final Temperature (°C)
-              <span className="text-theme-muted">- should be &lt;8°C</span>
-            </label>
+            <div className="flex items-center justify-between mb-3">
+              <label className="flex items-center gap-2 text-sm font-medium text-theme-secondary">
+                <Thermometer className="w-4 h-4 text-sky-400" />
+                Final Temperature (°C)
+              </label>
+              {isPreselectedTemp && (
+                <span className="text-[10px] uppercase tracking-wider font-bold text-sky-400 animate-pulse bg-sky-500/10 px-2 py-0.5 rounded-full border border-sky-500/20">
+                  Captured by voice
+                </span>
+              )}
+            </div>
 
             {!showCustomTemp ? (
               <>
@@ -241,7 +298,7 @@ export function CloseCoolingModal({
               <div className="mt-3 p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl flex items-start gap-2">
                 <AlertTriangle className="w-5 h-5 text-amber-400 flex-shrink-0 mt-0.5" />
                 <p className="text-sm text-amber-300">
-                  Temperature is ≥8°C. FSAI requires food to be cooled to &lt;8°C 
+                  Temperature is ≥8°C. FSAI requires food to be cooled to &lt;8°C
                   within 2 hours. Consider continuing to cool or document exception.
                 </p>
               </div>
@@ -252,28 +309,65 @@ export function CloseCoolingModal({
         {/* Footer Actions */}
         <div className="p-4 border-t border-theme-primary space-y-3 safe-area-bottom">
           {/* Confirm Button - Large touch target */}
-          <Button
-            variant="primary"
-            size="kiosk"
-            fullWidth
-            onClick={handleConfirm}
-            className={cn(
-              'flex items-center justify-center gap-2 py-5',
-              isTempCompliant && 'bg-emerald-600 hover:bg-emerald-500'
-            )}
-          >
-            <Snowflake className="w-6 h-6" />
-            <span className="font-bold text-lg">
-              {selectedTemp !== undefined 
-                ? `Confirm at ${selectedTemp}°C` 
-                : 'Confirm Move to Fridge'}
-            </span>
-          </Button>
+          {!finalConfirmationRequired ? (
+            <Button
+              variant="primary"
+              size="kiosk"
+              fullWidth
+              onClick={() => setFinalConfirmationRequired(true)}
+              className={cn(
+                'flex items-center justify-center gap-2 py-5',
+                isTempCompliant && 'bg-emerald-600 hover:bg-emerald-500'
+              )}
+            >
+              <Snowflake className="w-6 h-6" />
+              <span className="font-bold text-lg">
+                {selectedTemp !== undefined
+                  ? `Confirm at ${selectedTemp}°C`
+                  : 'Confirm Move to Fridge'}
+              </span>
+            </Button>
+          ) : (
+            <div className="space-y-2">
+              <div className="p-3 bg-theme-secondary border border-theme-primary rounded-xl text-sm text-theme-secondary">
+                <p className="font-semibold text-theme-primary">Final confirmation</p>
+                <p>Item: {session.item_name}</p>
+                <p>Staff: {effectiveSelectedStaff?.name || 'Not selected'}</p>
+                <p>Temperature: {selectedTemp !== undefined ? `${selectedTemp}°C` : 'Skipped'}</p>
+              </div>
+              <Button
+                variant="primary"
+                size="kiosk"
+                fullWidth
+                onClick={handleConfirm}
+                className={cn(
+                  'flex items-center justify-center gap-2 py-5',
+                  isTempCompliant && 'bg-emerald-600 hover:bg-emerald-500'
+                )}
+              >
+                <Snowflake className="w-6 h-6" />
+                <span className="font-bold text-lg">Confirm & Save</span>
+              </Button>
+              <Button
+                variant="secondary"
+                size="md"
+                fullWidth
+                onClick={() => setFinalConfirmationRequired(false)}
+              >
+                Go Back
+              </Button>
+            </div>
+          )}
 
           {/* Skip Temperature (for quick entry) */}
           {selectedTemp === undefined && (
             <button
-              onClick={handleConfirm}
+              onClick={() => {
+                setTemperature(undefined)
+                setCustomTemp('')
+                setShowCustomTemp(false)
+                setFinalConfirmationRequired(true)
+              }}
               className="w-full py-3 text-sm text-theme-muted hover:text-theme-secondary transition-colors"
             >
               Skip temperature (not recommended)

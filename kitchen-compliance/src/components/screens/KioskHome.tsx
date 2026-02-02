@@ -11,7 +11,9 @@ import { useAppStore, getActiveSessions, getOverdueSessions, WAKE_WORD_OPTIONS }
 import { useCoolingWorkflow } from '@/services/coolingService'
 import type { FoodItemPreset, VoiceCommand, CoolingSession, CloseCoolingData } from '@/types'
 import { useTextToSpeech } from '@/hooks/useVoiceRecognition'
+import { useVoiceCloseFlow } from '@/hooks/useVoiceCloseFlow'
 import { useWakeWord, playWakeSound, getPrimaryWakeWordLabel } from '@/hooks/useWakeWord'
+import { parseVoiceCommand } from '@/lib/voiceCommands'
 
 interface KioskHomeProps {
   onNavigateToHistory?: () => void
@@ -28,31 +30,14 @@ export function KioskHome({
   const [closeModalSessionId, setCloseModalSessionId] = useState<string | null>(null)
   const [wakeWordTriggered, setWakeWordTriggered] = useState(false)
   const [isFridgeTempModalOpen, setIsFridgeTempModalOpen] = useState(false)
-  
-  const { coolingSessions, settings } = useAppStore()
+
+  const { coolingSessions, settings, staffMembers } = useAppStore()
   const { startCooling, closeCooling, discardCooling, updateSessionStatuses } = useCoolingWorkflow()
   const { speak } = useTextToSpeech()
-  
+
   // Ref to trigger voice button programmatically
   const voiceButtonRef = useRef<VoiceButtonHandle>(null)
-  
-  // Wake word detection - "Hey Chef" always listening mode
-  const handleWakeWordDetected = useCallback(() => {
-    console.log('[KioskHome] Wake word detected!')
-    playWakeSound()
-    setWakeWordTriggered(true)
-    
-    // Trigger the voice button
-    if (voiceButtonRef.current) {
-      voiceButtonRef.current.triggerVoice()
-    }
-  }, [])
-  
-  const handleImmediateCommand = useCallback((command: string) => {
-    console.log('[KioskHome] Immediate command after wake word:', command)
-    // The VoiceButton will handle this when it processes the voice input
-  }, [])
-  
+
   // Get active wake words from settings
   const activeWakeWordPhrases = useMemo(() => {
     const activeIds = settings.activeWakeWords || ['luma']
@@ -61,19 +46,11 @@ export function KioskHome({
       return option ? option.phrases : []
     })
   }, [settings.activeWakeWords])
-  
+
   // Get primary wake word for display
   const primaryWakeWordLabel = useMemo(() => {
     return getPrimaryWakeWordLabel(activeWakeWordPhrases)
   }, [activeWakeWordPhrases])
-  
-  const { isActive: isWakeWordActive, resumeListening } = useWakeWord({
-    onWakeWordDetected: handleWakeWordDetected,
-    onCommandDetected: handleImmediateCommand,
-    enabled: settings.wakeWordEnabled,
-    language: settings.language === 'en' ? 'en-IE' : settings.language,
-    wakeWords: activeWakeWordPhrases,
-  })
 
   // Get the session being closed for the modal
   const sessionToClose = useMemo(
@@ -84,6 +61,9 @@ export function KioskHome({
   // Use memoized selectors
   const activeSessions = useMemo(() => getActiveSessions(coolingSessions), [coolingSessions])
   const overdueSessions = useMemo(() => getOverdueSessions(coolingSessions), [coolingSessions])
+  const sessionReferenceMap = useMemo(() => {
+    return new Map(activeSessions.map((session, index) => [session.id, index + 1]))
+  }, [activeSessions])
 
   // Update session statuses every 10 seconds
   useEffect(() => {
@@ -109,32 +89,68 @@ export function KioskHome({
     setCloseModalSessionId(sessionId)
   }, [])
 
+  const handleVoiceOpenCloseModal = useCallback((sessionId: string) => {
+    setCloseModalSessionId(sessionId)
+  }, [])
+
+  // Handle auto-start voice listening after TTS completes
+  const handleAwaitingInput = useCallback(() => {
+    console.log('[KioskHome] Voice flow awaiting input - triggering voice button after TTS')
+    // Delay to ensure TTS audio has completely finished playing
+    // and system isn't capturing its own voice
+    setTimeout(() => {
+      if (voiceButtonRef.current) {
+        voiceButtonRef.current.triggerVoice()
+      }
+    }, 800) // 800ms delay to avoid capturing TTS echo
+  }, [])
+
+  // Handle stopping voice listening when valid input is detected (called by checkInterimTranscript)
+  const handleStopListening = useCallback(() => {
+    console.log('[KioskHome] Stopping listening - valid input detected')
+    if (voiceButtonRef.current) {
+      voiceButtonRef.current.stopVoice()
+    }
+  }, [])
+
   // Handle closing a cooling session with temperature data
+  const voiceCloseFlow = useVoiceCloseFlow({
+    sessions: activeSessions,
+    staffMembers,
+    onConfirm: async (sessionId, data) => {
+      await closeCooling(sessionId, data)
+      setCloseModalSessionId(null)
+    },
+    onOpenModal: handleVoiceOpenCloseModal,
+    onCloseModal: () => setCloseModalSessionId(null),
+    speak,
+    onAwaitingInput: handleAwaitingInput,
+    onStopListening: handleStopListening, // Stop listening immediately when valid input detected
+  })
+
+  // Handle confirming close
   const handleConfirmClose = useCallback(
     async (data: CloseCoolingData) => {
       if (!closeModalSessionId) return
-      
+
       const success = await closeCooling(closeModalSessionId, data)
       if (success) {
-        const tempMsg = data.temperature !== undefined 
-          ? ` at ${data.temperature} degrees` 
+        const tempMsg = data.temperature !== undefined
+          ? ` at ${data.temperature} degrees celsius`
           : ''
-        speak(`Item moved to fridge${tempMsg}. Well done!`)
+        speak(`Item moved to fridge${tempMsg}. Well done!`, {
+          onComplete: () => {
+            // Resume wake word listening after completion message
+            if (settings.wakeWordEnabled) {
+              setTimeout(() => resumeListening(), 500)
+            }
+          }
+        })
         setCloseModalSessionId(null)
+        voiceCloseFlow.reset()
       }
     },
-    [closeModalSessionId, closeCooling, speak]
-  )
-
-  // Legacy handler for quick close without modal (voice commands)
-  const handleQuickClose = useCallback(
-    async (sessionId: string) => {
-      const success = await closeCooling(sessionId)
-      if (success) {
-        speak('Item moved to fridge. Well done!')
-      }
-    },
-    [closeCooling, speak]
+    [closeModalSessionId, closeCooling, speak, voiceCloseFlow]
   )
 
   // Handle discarding a cooling session
@@ -148,12 +164,49 @@ export function KioskHome({
     [discardCooling, speak]
   )
 
+  // Interim wake word detection (fast feedback)
+  const handleWakeWordHeard = useCallback(() => {
+    console.log('[KioskHome] Wake word heard (interim)')
+    playWakeSound()
+    setWakeWordTriggered(true)
+  }, [])
+
+  // Wake word detection - ready for command mode
+  const handleWakeWordDetected = useCallback(() => {
+    console.log('[KioskHome] Wake word detected (final) - triggering command mode INSTANTLY')
+
+    // Trigger the voice button IMMEDIATELY (no delay for wake word)
+    if (voiceButtonRef.current) {
+      voiceButtonRef.current.triggerVoice()
+    }
+  }, [])
+
+  // Forward declaration for handleVoiceCommand used in handleImmediateCommand
+  const handleVoiceCommandRef = useRef<(command: VoiceCommand) => void>(() => { })
+
+  const handleImmediateCommand = useCallback((command: string) => {
+    console.log('[KioskHome] Immediate command after wake word:', command)
+    const parsedCommand = parseVoiceCommand(command)
+    if (parsedCommand.type !== 'unknown') {
+      handleVoiceCommandRef.current(parsedCommand)
+    }
+  }, [])
+
+  const { isActive: isWakeWordActive, resumeListening } = useWakeWord({
+    onWakeWordHeard: handleWakeWordHeard,
+    onWakeWordDetected: handleWakeWordDetected,
+    onCommandDetected: handleImmediateCommand,
+    enabled: settings.wakeWordEnabled,
+    language: settings.language === 'en' ? 'en-IE' : settings.language,
+    wakeWords: activeWakeWordPhrases,
+  })
+
   // Handle voice commands
   const handleVoiceCommand = useCallback(
     (command: VoiceCommand) => {
       // Reset wake word triggered state
       setWakeWordTriggered(false)
-      
+
       switch (command.type) {
         case 'start_cooling':
           if (command.item) {
@@ -163,10 +216,7 @@ export function KioskHome({
           }
           break
         case 'stop_cooling':
-          // Close the most recent active session (quick close via voice)
-          if (activeSessions.length > 0) {
-            handleQuickClose(activeSessions[0].id)
-          }
+          voiceCloseFlow.startFlow(command.item)
           break
         case 'discard':
           // Discard the most recent active session
@@ -175,18 +225,23 @@ export function KioskHome({
           }
           break
         default:
-          // Unknown command - modal already provides feedback
+          // Unknown command - feedback provided in VoiceButton
           break
       }
-      
+
       // Resume wake word listening after command processed
       if (settings.wakeWordEnabled) {
         resumeListening()
       }
     },
-    [activeSessions, handleStartCooling, handleQuickClose, handleDiscardCooling, settings.wakeWordEnabled, resumeListening]
+    [activeSessions, handleStartCooling, handleDiscardCooling, settings.wakeWordEnabled, resumeListening, voiceCloseFlow]
   )
-  
+
+  // Update ref
+  useEffect(() => {
+    handleVoiceCommandRef.current = handleVoiceCommand
+  }, [handleVoiceCommand])
+
   // Handle when voice button finishes (for resuming wake word)
   const handleVoiceEnd = useCallback(() => {
     setWakeWordTriggered(false)
@@ -219,6 +274,7 @@ export function KioskHome({
                   session={session}
                   onClose={handleOpenCloseModal}
                   onDiscard={handleDiscardCooling}
+                  referenceNumber={sessionReferenceMap.get(session.id)}
                 />
               ))}
             </div>
@@ -247,6 +303,7 @@ export function KioskHome({
                     onClose={handleOpenCloseModal}
                     onDiscard={handleDiscardCooling}
                     compact={activeSessions.length > 3 && index > 0}
+                    referenceNumber={sessionReferenceMap.get(session.id)}
                   />
                 ))}
             </div>
@@ -263,10 +320,10 @@ export function KioskHome({
               No items cooling
             </h2>
             <p className="text-theme-muted max-w-sm mb-6">
-              Tap the button below or use voice commands to start tracking 
+              Tap the button below or use voice commands to start tracking
               cooked food that needs to cool before refrigeration.
             </p>
-            
+
             {/* Voice Command Hints */}
             <div className="bg-theme-secondary rounded-xl p-4 max-w-sm w-full border border-theme-primary">
               <div className="flex items-center gap-2 mb-3">
@@ -281,7 +338,7 @@ export function KioskHome({
                 </div>
                 <div className="flex items-center gap-2 text-sm">
                   <span className="text-theme-muted">"</span>
-                  <span className="text-emerald-400">In fridge</span>
+                  <span className="text-emerald-400">Finish cooling 1</span>
                   <span className="text-theme-muted">" or "</span>
                   <span className="text-emerald-400">Done</span>
                   <span className="text-theme-muted">"</span>
@@ -297,13 +354,11 @@ export function KioskHome({
         )}
       </main>
 
-      {/* Bottom Action Bar - Compact when sessions active */}
+      {/* Bottom Action Bar */}
       <div className="fixed bottom-0 left-0 right-0 safe-area-bottom bg-theme-card/98 backdrop-blur-md border-t border-theme-primary">
         <div className="max-w-lg mx-auto p-3">
-          {/* Compact layout when sessions are active */}
           {hasActive ? (
             <div className="flex items-center gap-3">
-              {/* Main Action: Start Cooling */}
               <Button
                 variant="cooling"
                 size="lg"
@@ -314,7 +369,6 @@ export function KioskHome({
                 Add Item
               </Button>
 
-              {/* Fridge Temp Button - More prominent */}
               <Button
                 variant="secondary"
                 size="lg"
@@ -325,7 +379,6 @@ export function KioskHome({
                 <span className="text-sm">Temp</span>
               </Button>
 
-              {/* Secondary Actions */}
               {onNavigateToHistory && (
                 <Button
                   variant="ghost"
@@ -336,20 +389,21 @@ export function KioskHome({
                 </Button>
               )}
 
-              {/* Voice Button - Compact */}
-              <VoiceButton 
+              <VoiceButton
                 ref={voiceButtonRef}
-                onCommand={handleVoiceCommand} 
+                onCommand={handleVoiceCommand}
+                onTranscript={voiceCloseFlow.handleTranscript}
+                onInterimTranscript={voiceCloseFlow.checkInterimTranscript}
                 onEnd={handleVoiceEnd}
-                size="sm" 
+                size="sm"
                 wakeWordActive={isWakeWordActive}
                 wakeWordTriggered={wakeWordTriggered}
                 wakeWordLabel={primaryWakeWordLabel}
+                conversationMode={voiceCloseFlow.step !== 'idle'}
               />
             </div>
           ) : (
             <>
-              {/* Main Action: Start Cooling - Full size when empty */}
               <Button
                 variant="cooling"
                 size="kiosk"
@@ -361,10 +415,8 @@ export function KioskHome({
                 Start Cooling
               </Button>
 
-              {/* Secondary Actions */}
               <div className="flex items-center justify-between">
                 <div className="flex gap-2">
-                  {/* Fridge Temp Button - Large & Prominent */}
                   <Button
                     variant="secondary"
                     size="lg"
@@ -384,27 +436,19 @@ export function KioskHome({
                       History
                     </Button>
                   )}
-                  {onNavigateToReports && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={onNavigateToReports}
-                    >
-                      <FileText className="w-5 h-5 mr-1.5" />
-                      Reports
-                    </Button>
-                  )}
                 </div>
 
-                {/* Voice Button */}
-                <VoiceButton 
+                <VoiceButton
                   ref={voiceButtonRef}
-                  onCommand={handleVoiceCommand} 
+                  onCommand={handleVoiceCommand}
+                  onTranscript={voiceCloseFlow.handleTranscript}
+                  onInterimTranscript={voiceCloseFlow.checkInterimTranscript}
                   onEnd={handleVoiceEnd}
-                  size="md" 
+                  size="md"
                   wakeWordActive={isWakeWordActive}
                   wakeWordTriggered={wakeWordTriggered}
                   wakeWordLabel={primaryWakeWordLabel}
+                  conversationMode={voiceCloseFlow.step !== 'idle'}
                 />
               </div>
             </>
@@ -412,22 +456,25 @@ export function KioskHome({
         </div>
       </div>
 
-      {/* Start Cooling Modal */}
       <StartCoolingModal
         isOpen={isStartModalOpen}
         onClose={() => setIsStartModalOpen(false)}
         onStart={handleStartCooling}
       />
 
-      {/* Close Cooling Modal with Temperature Input */}
       <CloseCoolingModal
+        key={`${closeModalSessionId ?? 'none'}-${voiceCloseFlow.staffId ?? 'none'}-${voiceCloseFlow.temperature ?? 'none'}`}
         isOpen={closeModalSessionId !== null}
-        onClose={() => setCloseModalSessionId(null)}
+        onClose={() => {
+          setCloseModalSessionId(null)
+          voiceCloseFlow.reset()
+        }}
         onConfirm={handleConfirmClose}
         session={sessionToClose}
+        preselectedStaffId={voiceCloseFlow.staffId}
+        preselectedTemperature={voiceCloseFlow.temperature ?? null}
       />
 
-      {/* Fridge Temperature Logging Modal */}
       <FridgeTempModal
         isOpen={isFridgeTempModalOpen}
         onClose={() => setIsFridgeTempModalOpen(false)}

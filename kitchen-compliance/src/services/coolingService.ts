@@ -5,6 +5,34 @@ import type { Json } from '@/types/database.types'
 import { COOLING_POLICY, getCoolingStatus, type CoolingStatus } from '@/lib/utils'
 import { supabase, isSupabaseConfigured } from '@/lib/supabase'
 
+const mapCoolingSessionRow = (row: any): CoolingSession => ({
+  id: row.id,
+  item_name: row.item_name,
+  item_category: row.item_category as FoodItemPreset['category'],
+  started_at: row.started_at,
+  soft_due_at: row.soft_due_at,
+  hard_due_at: row.hard_due_at,
+  closed_at: row.closed_at || undefined,
+  status: row.status as CoolingStatus,
+  close_action: row.close_action as CoolingSession['close_action'],
+  // Temperature data
+  start_temperature: row.start_temperature ?? undefined,
+  end_temperature: row.end_temperature ?? undefined,
+  // Staff tracking (aligned with database schema)
+  started_by_id: row.started_by_id || undefined,
+  staff_name: row.staff_name || undefined,
+  closed_by: row.closed_by || undefined,
+  closed_by_id: row.closed_by_id || undefined,
+  // Food item reference
+  food_item_id: row.food_item_id || undefined,
+  // Exception handling
+  exception_reason: row.exception_reason || undefined,
+  exception_approved_by: row.exception_approved_by || undefined,
+  created_by: row.created_by || undefined,
+  site_id: row.site_id,
+  synced: true,
+})
+
 // Create a new cooling session
 export function createCoolingSession(
   itemName: string,
@@ -154,39 +182,35 @@ export async function fetchActiveSessions(siteId: string): Promise<CoolingSessio
       .order('started_at', { ascending: false })
 
     if (error) throw error
-    
-    // Cast data to any to bypass type checking
+
     const data: any[] = rawData || []
 
-    return data.map((row) => ({
-      id: row.id,
-      item_name: row.item_name,
-      item_category: row.item_category as FoodItemPreset['category'],
-      started_at: row.started_at,
-      soft_due_at: row.soft_due_at,
-      hard_due_at: row.hard_due_at,
-      closed_at: row.closed_at || undefined,
-      status: row.status as CoolingStatus,
-      close_action: row.close_action as CoolingSession['close_action'],
-      // Temperature data
-      start_temperature: row.start_temperature ?? undefined,
-      end_temperature: row.end_temperature ?? undefined,
-      // Staff tracking (aligned with database schema)
-      started_by_id: row.started_by_id || undefined,
-      staff_name: row.staff_name || undefined,
-      closed_by: row.closed_by || undefined,
-      closed_by_id: row.closed_by_id || undefined,
-      // Food item reference
-      food_item_id: row.food_item_id || undefined,
-      // Exception handling
-      exception_reason: row.exception_reason || undefined,
-      exception_approved_by: row.exception_approved_by || undefined,
-      created_by: row.created_by || undefined,
-      site_id: row.site_id,
-      synced: true,
-    }))
+    return data.map(mapCoolingSessionRow)
   } catch (err) {
     console.error('Failed to fetch sessions from Supabase:', err)
+    return []
+  }
+}
+
+// Fetch all sessions for a site (active + closed)
+export async function fetchCoolingSessions(siteId: string): Promise<CoolingSession[]> {
+  if (!isSupabaseConfigured()) {
+    return []
+  }
+
+  try {
+    const { data: rawData, error } = await (supabase
+      .from('cooling_sessions') as any)
+      .select('*')
+      .eq('site_id', siteId)
+      .order('started_at', { ascending: false })
+
+    if (error) throw error
+
+    const data: any[] = rawData || []
+    return data.map(mapCoolingSessionRow)
+  } catch (err) {
+    console.error('Failed to fetch all sessions from Supabase:', err)
     return []
   }
 }
@@ -201,6 +225,7 @@ export function useCoolingWorkflow() {
     addToOfflineQueue,
     currentSite,
     isOnline,
+    isDemo,
   } = useAppStore()
 
   // Start a new cooling session
@@ -228,13 +253,16 @@ export function useCoolingWorkflow() {
       item_category: itemCategory,
     })
 
-    // Sync to Supabase if online
-    if (isOnline) {
+    // Sync to Supabase if online (skip or squash errors if in demo mode or auth is missing)
+    if (isOnline && !isDemo) {
       const synced = await syncSessionToSupabase(session)
       if (synced) {
         updateCoolingSession(session.id, { synced: true })
         await syncEventToSupabase(event)
       }
+    } else if (isDemo) {
+      // In demo mode, we just mark as synced locally to avoid error UI
+      updateCoolingSession(session.id, { synced: true })
     } else {
       // Queue for later sync
       addToOfflineQueue(event)
@@ -278,12 +306,14 @@ export function useCoolingWorkflow() {
     })
 
     // Sync to Supabase if online
-    if (isOnline) {
+    if (isOnline && !isDemo) {
       const synced = await syncSessionToSupabase({ ...session, ...updates })
       if (synced) {
         updateCoolingSession(sessionId, { synced: true })
         await syncEventToSupabase(event)
       }
+    } else if (isDemo) {
+      updateCoolingSession(sessionId, { synced: true })
     } else {
       addToOfflineQueue(event)
     }
@@ -317,12 +347,14 @@ export function useCoolingWorkflow() {
     })
 
     // Sync to Supabase if online
-    if (isOnline) {
+    if (isOnline && !isDemo) {
       const synced = await syncSessionToSupabase({ ...session, ...updates })
       if (synced) {
         updateCoolingSession(sessionId, { synced: true })
         await syncEventToSupabase(event)
       }
+    } else if (isDemo) {
+      updateCoolingSession(sessionId, { synced: true })
     } else {
       addToOfflineQueue(event)
     }
@@ -381,7 +413,7 @@ export function useCoolingWorkflow() {
       if (session.closed_at) return // Skip closed sessions
 
       const currentStatus = getCoolingStatus(new Date(session.started_at))
-      
+
       if (currentStatus !== session.status) {
         updateCoolingSession(session.id, { status: currentStatus })
 

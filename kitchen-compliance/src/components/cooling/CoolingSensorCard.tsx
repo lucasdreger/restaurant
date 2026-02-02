@@ -7,9 +7,10 @@ interface CoolingSensorCardProps {
   session: CoolingSession
   onClose: (sessionId: string) => void
   onDiscard: (sessionId: string) => void
+  referenceNumber?: number
 }
 
-export function CoolingSensorCard({ session, onClose, onDiscard }: CoolingSensorCardProps) {
+export function CoolingSensorCard({ session, onClose, onDiscard, referenceNumber }: CoolingSensorCardProps) {
   const [timeRemaining, setTimeRemaining] = useState('')
   const [elapsedTime, setElapsedTime] = useState('')
   const [progress, setProgress] = useState(0)
@@ -127,9 +128,16 @@ export function CoolingSensorCard({ session, onClose, onDiscard }: CoolingSensor
             <span className="drop-shadow-md">{getCategoryEmoji()}</span>
           </div>
           <div>
-            <h3 className="font-bold text-lg text-theme-primary">
-              {session.item_name}
-            </h3>
+            <div className="flex items-center gap-2">
+              {referenceNumber !== undefined && (
+                <span className="px-2 py-0.5 rounded-full bg-theme-ghost text-xs font-semibold text-theme-muted">
+                  #{referenceNumber}
+                </span>
+              )}
+              <h3 className="font-bold text-lg text-theme-primary">
+                {session.item_name}
+              </h3>
+            </div>
             <div className="flex items-center gap-2 text-xs text-theme-muted">
               <Thermometer className="w-3 h-3" />
               <span>FSAI SC3 Cooling Protocol</span>
@@ -235,7 +243,7 @@ export function CoolingSensorCard({ session, onClose, onDiscard }: CoolingSensor
 }
 
 // Compact version for list view - Stunning
-export function CoolingSensorCardCompact({ session, onClose, onDiscard }: CoolingSensorCardProps) {
+export function CoolingSensorCardCompact({ session, onClose, onDiscard, referenceNumber }: CoolingSensorCardProps) {
   const [timeRemaining, setTimeRemaining] = useState('')
 
   useEffect(() => {
@@ -279,9 +287,16 @@ export function CoolingSensorCardCompact({ session, onClose, onDiscard }: Coolin
       </div>
       
       <div className="flex-1 min-w-0">
-        <h4 className="font-semibold text-theme-primary truncate">
-          {session.item_name}
-        </h4>
+        <div className="flex items-center gap-2">
+          {referenceNumber !== undefined && (
+            <span className="px-2 py-0.5 rounded-full bg-theme-ghost text-[10px] font-semibold text-theme-muted">
+              #{referenceNumber}
+            </span>
+          )}
+          <h4 className="font-semibold text-theme-primary truncate">
+            {session.item_name}
+          </h4>
+        </div>
         <p className={cn(
           'text-sm font-medium',
           isOverdue ? 'text-red-500' : isWarning ? 'text-amber-500' : 'text-theme-muted'

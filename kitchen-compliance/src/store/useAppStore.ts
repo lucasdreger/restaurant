@@ -6,13 +6,14 @@ import type { CoolingSession, CoolingEvent, Alert, Site, StaffMember, FoodItemPr
 export type AppTheme = 'day' | 'night'
 
 // Audio models available through OpenRouter
-export type AudioModel = 
+export type AudioModel =
+  | 'openai/whisper-1'                // Industry standard for transcription - supports WebM!
   | 'openai/gpt-4o-audio-preview'     // $40/M audio tokens - highest quality
   | 'openai/gpt-audio'                 // $32/M audio tokens
   | 'openai/gpt-audio-mini'            // $0.60/M audio tokens - cost efficient!
 
 // OCR/Vision models available
-export type OCRModel = 
+export type OCRModel =
   | 'openai/gpt-4o'                    // OpenAI GPT-4o Vision
   | 'openai/gpt-4o-mini'               // OpenAI GPT-4o Mini (cheaper)
   | 'anthropic/claude-sonnet'          // Claude 3.5 Sonnet via OpenRouter
@@ -57,7 +58,7 @@ const defaultSettings: AppSettings = {
   openaiApiKey: null,
   openrouterApiKey: null,
   voiceProvider: 'browser',
-  audioModel: 'openai/gpt-audio-mini', // Default to cost-efficient model
+  audioModel: 'openai/gpt-audio-mini', // Default to reliable chat-audio model for better streaming support
   ocrProvider: 'tesseract', // Default to free local OCR
   ocrModel: 'tesseract', // Default to Tesseract
   apiProvider: 'openai',
@@ -82,10 +83,14 @@ interface AppState {
   currentSite: Site | null
   setCurrentSite: (site: Site | null) => void
 
+  // Demo mode
+  isDemo: boolean
+  setIsDemo: (isDemo: boolean) => void
+
   // Venue cache (to avoid re-fetching on every navigation)
   venueCache: VenueCache | null
   setVenueCache: (venue: VenueCache | null) => void
-  
+
   // Data loading state
   dataLoaded: {
     staff: boolean
@@ -168,13 +173,15 @@ export const useAppStore = create<AppState>()(
   persist(
     (set) => ({
       // Current site
+      isDemo: false,
+      setIsDemo: (isDemo) => set({ isDemo }),
       currentSite: null,
       setCurrentSite: (site) => set({ currentSite: site }),
 
       // Venue cache
       venueCache: null,
       setVenueCache: (venue) => set({ venueCache: venue }),
-      
+
       // Data loading state
       dataLoaded: { staff: false, food: false, fridges: false },
       setDataLoaded: (key, loaded) => set((state) => ({
@@ -253,11 +260,11 @@ export const useAppStore = create<AppState>()(
           alerts: state.alerts.map((a) =>
             a.id === id
               ? {
-                  ...a,
-                  acknowledged: true,
-                  acknowledged_at: new Date().toISOString(),
-                  acknowledged_by: by,
-                }
+                ...a,
+                acknowledged: true,
+                acknowledged_at: new Date().toISOString(),
+                acknowledged_by: by,
+              }
               : a
           ),
         })),
@@ -286,9 +293,16 @@ export const useAppStore = create<AppState>()(
       // Settings
       settings: defaultSettings,
       updateSettings: (updates) =>
-        set((state) => ({
-          settings: { ...state.settings, ...updates },
-        })),
+        set((state) => {
+          const newSettings = { ...state.settings, ...updates }
+
+          // Auto-migrate old default model to the new reliable Whisper model
+          if (newSettings.audioModel === 'openai/gpt-audio-mini' as any) {
+            newSettings.audioModel = 'openai/whisper-1'
+          }
+
+          return { settings: newSettings }
+        }),
     }),
     {
       name: 'kitchen-compliance-storage',
@@ -300,7 +314,11 @@ export const useAppStore = create<AppState>()(
         coolingSessions: state.coolingSessions,
         offlineQueue: state.offlineQueue,
         kioskMode: state.kioskMode,
-        settings: state.settings,
+        settings: {
+          ...state.settings,
+          openaiApiKey: null,
+          openrouterApiKey: null,
+        },
       }),
     }
   )

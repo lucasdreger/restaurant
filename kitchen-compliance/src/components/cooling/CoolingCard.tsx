@@ -16,6 +16,7 @@ interface CoolingCardProps {
   onClose: (id: string) => void
   onDiscard: (id: string) => void
   compact?: boolean
+  referenceNumber?: number
 }
 
 export function CoolingCard({
@@ -23,6 +24,7 @@ export function CoolingCard({
   onClose,
   onDiscard,
   compact = false,
+  referenceNumber,
 }: CoolingCardProps) {
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
   const [status, setStatus] = useState(session.status)
@@ -78,7 +80,14 @@ export function CoolingCard({
           <div className="flex items-center gap-3 flex-1 min-w-0">
             {statusIcon[status]}
             <div className="min-w-0">
-              <p className="font-bold text-base truncate text-theme-primary">{session.item_name}</p>
+              <div className="flex items-center gap-2">
+                {referenceNumber !== undefined && (
+                  <span className="px-2 py-0.5 rounded-full bg-theme-ghost text-[10px] font-semibold text-theme-muted">
+                    #{referenceNumber}
+                  </span>
+                )}
+                <p className="font-bold text-base truncate text-theme-primary">{session.item_name}</p>
+              </div>
               <p className="text-xs text-theme-muted">
                 {formatTimeFromDate(new Date(session.started_at))}
               </p>
@@ -151,7 +160,14 @@ export function CoolingCard({
       <div className="flex items-center gap-3 mb-3">
         {statusIcon[status]}
         <div className="flex-1 min-w-0">
-          <h3 className="font-bold text-lg truncate text-theme-primary">{session.item_name}</h3>
+          <div className="flex items-center gap-2">
+            {referenceNumber !== undefined && (
+              <span className="px-2 py-0.5 rounded-full bg-theme-ghost text-[10px] font-semibold text-theme-muted">
+                #{referenceNumber}
+              </span>
+            )}
+            <h3 className="font-bold text-lg truncate text-theme-primary">{session.item_name}</h3>
+          </div>
           <p className="text-xs text-theme-muted flex items-center gap-1">
             <Clock className="w-3 h-3" />
             Started {formatTimeFromDate(new Date(session.started_at))}

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { VOICE_TIMING } from '@/lib/voiceConfig'
 
 /**
  * Wake Word Detection Hook
@@ -42,7 +43,7 @@ function containsWakeWord(transcript: string, wakeWords: string[]): boolean {
 // Extract command after wake word (if any)
 function extractCommandAfterWakeWord(transcript: string, wakeWords: string[]): string | null {
   const lower = transcript.toLowerCase().trim()
-  
+
   for (const wake of wakeWords) {
     const wakeLower = wake.toLowerCase()
     const index = lower.indexOf(wakeLower)
@@ -55,7 +56,8 @@ function extractCommandAfterWakeWord(transcript: string, wakeWords: string[]): s
 }
 
 interface UseWakeWordOptions {
-  onWakeWordDetected: () => void
+  onWakeWordHeard?: () => void     // Called immediately on interim detect (e.g. for beep)
+  onWakeWordDetected: () => void   // Called when ready for full command mode
   onCommandDetected?: (command: string) => void
   enabled?: boolean
   language?: string
@@ -63,39 +65,52 @@ interface UseWakeWordOptions {
 }
 
 export function useWakeWord(options: UseWakeWordOptions) {
-  const { 
-    onWakeWordDetected, 
+  const {
+    onWakeWordHeard,
+    onWakeWordDetected,
     onCommandDetected,
-    enabled = false, 
+    enabled = false,
     language = 'en-IE',
     wakeWords = ['luma', 'hey luma', 'hi luma', 'ok luma', 'okay luma'],
   } = options
-  
+
   const [isSupported, setIsSupported] = useState(false)
   const [isActive, setIsActive] = useState(false)
   const [lastHeard, setLastHeard] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  
+
   const recognitionRef = useRef<SpeechRecognition | null>(null)
+  const onWakeWordHeardRef = useRef(onWakeWordHeard)
   const onWakeWordDetectedRef = useRef(onWakeWordDetected)
   const onCommandDetectedRef = useRef(onCommandDetected)
   const wakeWordsRef = useRef(wakeWords)
   const restartTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const isEnabledRef = useRef(enabled)
-  
+  const isInCommandModeRef = useRef(false)
+  const isStartingRef = useRef(false)
+  const consecutiveErrorsRef = useRef(0)
+  const isAbortingRef = useRef(false)
+
+  const pendingDetectionRef = useRef(false)
+  const pendingCommandRef = useRef<string | null>(null)
+
   // Keep refs up to date
+  useEffect(() => {
+    onWakeWordHeardRef.current = onWakeWordHeard
+  }, [onWakeWordHeard])
+
   useEffect(() => {
     onWakeWordDetectedRef.current = onWakeWordDetected
   }, [onWakeWordDetected])
-  
+
   useEffect(() => {
     onCommandDetectedRef.current = onCommandDetected
   }, [onCommandDetected])
-  
+
   useEffect(() => {
     wakeWordsRef.current = wakeWords
   }, [wakeWords])
-  
+
   useEffect(() => {
     isEnabledRef.current = enabled
   }, [enabled])
@@ -109,7 +124,10 @@ export function useWakeWord(options: UseWakeWordOptions) {
 
   // Start wake word listening
   const startListening = useCallback(() => {
-    if (!isSupported || recognitionRef.current) return
+    if (!isSupported || recognitionRef.current || isStartingRef.current) return
+
+    isStartingRef.current = true
+    isAbortingRef.current = false
 
     const SpeechRecognitionAPI =
       (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
@@ -124,20 +142,45 @@ export function useWakeWord(options: UseWakeWordOptions) {
       console.log('[WakeWord] Listening for wake words:', wakeWordsRef.current.slice(0, 3).join(', '), '...')
       setIsActive(true)
       setError(null)
+      isStartingRef.current = false
+      consecutiveErrorsRef.current = 0
     }
 
     recognition.onend = () => {
       console.log('[WakeWord] Recognition ended')
       setIsActive(false)
       recognitionRef.current = null
-      
-      // Auto-restart if still enabled (with small delay to avoid rate limiting)
-      if (isEnabledRef.current) {
-        restartTimeoutRef.current = setTimeout(() => {
-          console.log('[WakeWord] Auto-restarting...')
-          startListening()
-        }, 500)
+      isStartingRef.current = false
+
+      // If we stopped because of a detection, trigger the appropriate callback NOW that mic is free
+      if (pendingDetectionRef.current) {
+        pendingDetectionRef.current = false
+        onWakeWordDetectedRef.current()
+        isAbortingRef.current = false
+        return
       }
+
+      if (pendingCommandRef.current !== null) {
+        const cmd = pendingCommandRef.current
+        pendingCommandRef.current = null
+        onCommandDetectedRef.current?.(cmd)
+        isAbortingRef.current = false
+        return
+      }
+
+      // Auto-restart if still enabled (with backoff if we had errors)
+      if (isEnabledRef.current && !isInCommandModeRef.current && !isAbortingRef.current) {
+        const backoff = Math.min(10000, 1000 * Math.pow(2, consecutiveErrorsRef.current))
+        console.log(`[WakeWord] Retrying in ${backoff}ms (errors: ${consecutiveErrorsRef.current})`)
+
+        restartTimeoutRef.current = setTimeout(() => {
+          if (isEnabledRef.current && !isInCommandModeRef.current) {
+            console.log('[WakeWord] Auto-restarting...')
+            startListening()
+          }
+        }, backoff)
+      }
+      isAbortingRef.current = false
     }
 
     recognition.onresult = (event: SpeechRecognitionEvent) => {
@@ -145,50 +188,71 @@ export function useWakeWord(options: UseWakeWordOptions) {
       for (let i = event.resultIndex; i < event.results.length; i++) {
         const result = event.results[i]
         const transcript = result[0].transcript
-        
+        const isFinal = result.isFinal
+
         // Update last heard for debugging
         setLastHeard(transcript)
-        
+
         // Check for wake word using current wake words from ref
         if (containsWakeWord(transcript, wakeWordsRef.current)) {
-          console.log('[WakeWord] Wake word detected:', transcript)
-          
+          // INTERIM DETECTION: Trigger fast feedback (beep)
+          if (!isInCommandModeRef.current) {
+            onWakeWordHeardRef.current?.()
+            isInCommandModeRef.current = true
+          }
+
           // Check if there's a command following the wake word
           const immediateCommand = extractCommandAfterWakeWord(transcript, wakeWordsRef.current)
-          
-          // Stop listening temporarily while command mode is active
-          recognition.stop()
-          
-          // Trigger wake word callback
-          onWakeWordDetectedRef.current()
-          
-          // If there's an immediate command, send it
-          if (immediateCommand && result.isFinal) {
-            console.log('[WakeWord] Immediate command:', immediateCommand)
-            onCommandDetectedRef.current?.(immediateCommand)
+
+          // FINAL DETECTION: Process result
+          if (isFinal) {
+            console.log('[WakeWord] Final match found:', transcript)
+
+            if (immediateCommand && immediateCommand.length > 3) {
+              // User said command in same breath as wake word (e.g., "Hey Luma done")
+              console.log('[WakeWord] Immediate command detected:', immediateCommand)
+              pendingCommandRef.current = immediateCommand
+              isAbortingRef.current = true
+              recognition.stop()
+            } else {
+              // Just wake word - IMMEDIATELY trigger command mode (NO DELAY!)
+              console.log('[WakeWord] Wake word only - IMMEDIATELY stopping to start command recording')
+              pendingDetectionRef.current = true
+              isAbortingRef.current = true
+              recognition.stop()
+            }
+            return
           }
-          
-          return
+        } else if (isInCommandModeRef.current && isFinal) {
+          // User spoke something AFTER the interim wake word but in a separate final result
+          console.log('[WakeWord] Command follow-up after wake word:', transcript)
+          pendingCommandRef.current = transcript
+          isAbortingRef.current = true
+          recognition.stop()
         }
       }
     }
 
     recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
       console.log('[WakeWord] Error:', event.error)
-      
+
+      // Don't count 'no-speech' as a hard error for backoff
+      if (event.error !== 'no-speech') {
+        consecutiveErrorsRef.current += 1
+      }
+
       // Only show error for critical issues
       if (event.error === 'not-allowed') {
         setError('Microphone access denied')
-        setIsActive(false)
+        isEnabledRef.current = false // Stop trying if denied
       } else if (event.error === 'audio-capture') {
         setError('No microphone found')
-        setIsActive(false)
+        isEnabledRef.current = false
       }
-      // For other errors (no-speech, aborted), just restart
     }
 
     recognitionRef.current = recognition
-    
+
     try {
       recognition.start()
     } catch (err) {
@@ -203,9 +267,16 @@ export function useWakeWord(options: UseWakeWordOptions) {
       clearTimeout(restartTimeoutRef.current)
       restartTimeoutRef.current = null
     }
-    
+
+    isAbortingRef.current = true
+    isStartingRef.current = false
+
     if (recognitionRef.current) {
-      recognitionRef.current.abort()
+      try {
+        recognitionRef.current.abort()
+      } catch (e) {
+        console.warn('[WakeWord] Abort error:', e)
+      }
       recognitionRef.current = null
     }
     setIsActive(false)
@@ -217,6 +288,7 @@ export function useWakeWord(options: UseWakeWordOptions) {
       // Small delay before resuming
       setTimeout(() => {
         if (isEnabledRef.current) {
+          isInCommandModeRef.current = false
           startListening()
         }
       }, 1000)
@@ -230,7 +302,7 @@ export function useWakeWord(options: UseWakeWordOptions) {
     } else {
       stopListening()
     }
-    
+
     return () => {
       stopListening()
     }
@@ -254,16 +326,16 @@ export function playWakeSound() {
     const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)()
     const oscillator = audioContext.createOscillator()
     const gainNode = audioContext.createGain()
-    
+
     oscillator.connect(gainNode)
     gainNode.connect(audioContext.destination)
-    
+
     oscillator.frequency.value = 800 // Hz
     oscillator.type = 'sine'
-    
+
     gainNode.gain.setValueAtTime(0.3, audioContext.currentTime)
     gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.2)
-    
+
     oscillator.start(audioContext.currentTime)
     oscillator.stop(audioContext.currentTime + 0.2)
   } catch (e) {

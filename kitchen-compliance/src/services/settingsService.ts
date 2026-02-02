@@ -1,5 +1,39 @@
 import { supabase } from '@/lib/supabase'
 import type { StaffMember, StaffMemberInsert, StaffMemberUpdate, FoodItem, FoodItemInsert } from '@/types/database.types'
+import type { WakeWordId } from '@/store/useAppStore'
+
+export interface SiteSettingsPayload {
+  site_id: string
+  theme?: string | null
+  language?: string | null
+  voice_provider?: string | null
+  audio_model?: string | null
+  openai_api_key?: string | null
+  openrouter_api_key?: string | null
+  ocr_provider?: string | null
+  ocr_model?: string | null
+  tts_enabled?: boolean | null
+  wake_word_enabled?: boolean | null
+  active_wake_words?: WakeWordId[] | null
+}
+
+export interface SiteSettingsRecord {
+  id: string
+  site_id: string
+  theme: string | null
+  language: string | null
+  voice_provider: string | null
+  audio_model: string | null
+  openai_api_key: string | null
+  openrouter_api_key: string | null
+  ocr_provider: string | null
+  ocr_model: string | null
+  tts_enabled: boolean | null
+  wake_word_enabled: boolean | null
+  active_wake_words: WakeWordId[] | null
+  created_at: string | null
+  updated_at: string | null
+}
 
 // Site Management
 export const updateSiteSubscription = async (siteId: string, tier: 'basic' | 'pro' | 'enterprise') => {
@@ -12,6 +46,32 @@ export const updateSiteSubscription = async (siteId: string, tier: 'basic' | 'pr
   
   if (error) throw error
   return data
+}
+
+// Site Settings (per restaurant)
+export const getSiteSettings = async (siteId: string) => {
+  const { data, error } = await (supabase
+    .from('site_settings') as any)
+    .select('*')
+    .eq('site_id', siteId)
+    .maybeSingle()
+
+  if (error) throw error
+  return data as SiteSettingsRecord | null
+}
+
+export const upsertSiteSettings = async (payload: SiteSettingsPayload) => {
+  const { data, error } = await (supabase
+    .from('site_settings') as any)
+    .upsert({
+      ...payload,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'site_id' })
+    .select()
+    .single()
+
+  if (error) throw error
+  return data as SiteSettingsRecord
 }
 
 // Staff Management

@@ -27,6 +27,7 @@ export interface StaffMember {
   initials: string
   role: StaffRole
   active: boolean
+  staff_code?: string | null
   created_at: string
 }
 
@@ -157,7 +158,7 @@ export interface AppState {
 // Voice command types
 export type VoiceCommand = 
   | { type: 'start_cooling'; item?: string }
-  | { type: 'stop_cooling'; sessionId?: string }
+  | { type: 'stop_cooling'; sessionId?: string; item?: string }
   | { type: 'discard'; sessionId?: string }
   | { type: 'unknown' }
 

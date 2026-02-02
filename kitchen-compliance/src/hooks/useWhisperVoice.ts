@@ -1,79 +1,25 @@
-import { useCallback, useState, useEffect, useRef } from 'react'
+it stimport { useCallback, useState, useEffect, useRef } from 'react'
 import { useAppStore } from '@/store/useAppStore'
 import { whisperService } from '@/services/whisperService'
 import type { VoiceCommand } from '@/types'
-import { FOOD_ITEM_PRESETS } from '@/types'
-
-// Parse voice input to command (same logic as Web Speech API)
-function parseVoiceCommand(transcript: string): VoiceCommand {
-  const lower = transcript.toLowerCase().trim()
-  
-  // Start cooling commands
-  const startPatterns = [
-    /^(start|begin|new)\s*(cooling|cool)?\s*(.*)$/i,
-    /^cool\s*(.*)$/i,
-    /^cooling\s*(.*)$/i,
-  ]
-  
-  for (const pattern of startPatterns) {
-    const match = lower.match(pattern)
-    if (match) {
-      const itemName = match[match.length - 1]?.trim()
-      // Try to match with presets
-      const preset = FOOD_ITEM_PRESETS.find(
-        (p) =>
-          p.name.toLowerCase().includes(itemName) ||
-          p.id.includes(itemName) ||
-          itemName.includes(p.name.toLowerCase())
-      )
-      return {
-        type: 'start_cooling',
-        item: preset?.name || (itemName || undefined),
-      }
-    }
-  }
-  
-  // Stop/Close cooling commands
-  const stopPatterns = [
-    /^(stop|done|close|finish|in\s*fridge|fridge)\s*(cooling)?/i,
-    /^cooling\s*(done|finished|complete)/i,
-  ]
-  
-  for (const pattern of stopPatterns) {
-    if (pattern.test(lower)) {
-      return { type: 'stop_cooling' }
-    }
-  }
-  
-  // Discard commands
-  const discardPatterns = [
-    /^(discard|throw|bin|trash|waste)/i,
-    /^(throw|toss)\s*(it)?\s*(away|out)?/i,
-  ]
-  
-  for (const pattern of discardPatterns) {
-    if (pattern.test(lower)) {
-      return { type: 'discard' }
-    }
-  }
-  
-  return { type: 'unknown' }
-}
+import { parseVoiceCommand } from '@/lib/voiceCommands'
 
 interface UseWhisperVoiceOptions {
   onCommand?: (command: VoiceCommand) => void
   onTranscript?: (transcript: string) => void
   onError?: (error: string) => void
+  disabled?: boolean // Don't process commands when disabled (for conversation mode)
 }
 
 export function useWhisperVoice(options: UseWhisperVoiceOptions = {}) {
-  const { onCommand, onTranscript, onError } = options
+  const { onCommand, onTranscript, onError, disabled = false } = options
   const [isConfigured, setIsConfigured] = useState(false)
   const [transcript, setTranscript] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [isProcessing, setIsProcessing] = useState(false)
   const isRecordingRef = useRef(false)
-  
+  const autoStopTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+
   const { isListening, setIsListening, settings } = useAppStore()
 
   // Check if service is configured with API key
@@ -102,23 +48,46 @@ export function useWhisperVoice(options: UseWhisperVoiceOptions = {}) {
 
   // Start recording
   const startListening = useCallback(async () => {
+    console.log('[WhisperHook] startListening called')
+    console.log('[WhisperHook] isConfigured:', isConfigured)
+    console.log('[WhisperHook] settings.voiceProvider:', settings.voiceProvider)
+    
     if (!isConfigured) {
-      const msg = 'Please configure OpenAI API key in Settings to use voice'
+      const msg = settings.voiceProvider === 'openrouter'
+        ? 'Please configure an OpenRouter API key in Settings to use voice'
+        : 'Please configure an OpenAI API key in Settings to use voice'
+      console.error('[WhisperHook] Not configured:', msg)
       setError(msg)
       onError?.(msg)
       return
     }
 
-    if (isListening || isRecordingRef.current) return
+    if (isListening || isRecordingRef.current) {
+      console.log('[WhisperHook] Already listening, skipping')
+      return
+    }
 
     try {
       setTranscript('')
       setError(null)
       isRecordingRef.current = true
       setIsListening(true)
-      
+
+      console.log('[WhisperHook] Starting whisperService.startRecording()...')
       await whisperService.startRecording()
-      console.log('[WhisperHook] Recording started')
+      console.log('[WhisperHook] Recording started successfully')
+
+      // Stop recording when silence is detected
+      whisperService.setOnSilenceDetected(() => {
+        console.log('[WhisperHook] Silence auto-stop triggered')
+        stopListening()
+      })
+
+      // Auto-stop limit after 10 seconds for safety
+      autoStopTimeoutRef.current = setTimeout(() => {
+        console.log('[WhisperHook] Auto-stopping recording after 10s')
+        stopListening()
+      }, 10000)
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to start recording'
       console.error('[WhisperHook] Start error:', msg)
@@ -127,26 +96,37 @@ export function useWhisperVoice(options: UseWhisperVoiceOptions = {}) {
       isRecordingRef.current = false
       setIsListening(false)
     }
-  }, [isConfigured, isListening, setIsListening, onError])
+  }, [isConfigured, isListening, setIsListening, onError, settings.voiceProvider])
 
   // Stop recording and transcribe
   const stopListening = useCallback(async () => {
     if (!isRecordingRef.current) return
 
+    // Clear auto-stop timeout
+    if (autoStopTimeoutRef.current) {
+      clearTimeout(autoStopTimeoutRef.current)
+      autoStopTimeoutRef.current = null
+    }
+
     try {
       setIsProcessing(true)
       isRecordingRef.current = false
-      
+
       const text = await whisperService.stopAndTranscribe()
       console.log('[WhisperHook] Transcription:', text)
-      
+
       setTranscript(text)
       onTranscript?.(text)
-      
+
       if (text) {
-        const command = parseVoiceCommand(text)
-        console.log('[WhisperHook] Parsed command:', command)
-        onCommand?.(command)
+        // Only parse commands if not disabled (i.e., not in conversation mode)
+        if (!disabled) {
+          const command = parseVoiceCommand(text)
+          console.log('[WhisperHook] Parsed command:', command)
+          onCommand?.(command)
+        } else {
+          console.log('[WhisperHook] DISABLED - not parsing as command, just transcript:', text)
+        }
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Transcription failed'
@@ -157,7 +137,7 @@ export function useWhisperVoice(options: UseWhisperVoiceOptions = {}) {
       setIsProcessing(false)
       setIsListening(false)
     }
-  }, [setIsListening, onCommand, onTranscript, onError])
+  }, [setIsListening, onCommand, onTranscript, onError, disabled])
 
   // Toggle listening (press-and-hold style - start on first click, stop on second)
   const toggleListening = useCallback(async () => {

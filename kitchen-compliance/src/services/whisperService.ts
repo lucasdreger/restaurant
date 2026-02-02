@@ -27,32 +27,84 @@ export class AudioRecorder {
 
   async start(): Promise<void> {
     try {
-      this.stream = await navigator.mediaDevices.getUserMedia({ 
+      this.stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: true,
           noiseSuppression: true,
           sampleRate: 16000,
-        } 
+        }
       })
-      
+
       this.mediaRecorder = new MediaRecorder(this.stream, {
         mimeType: this.getSupportedMimeType(),
       })
-      
+
       this.audioChunks = []
-      
+
       this.mediaRecorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
           this.audioChunks.push(event.data)
         }
       }
-      
+
       this.mediaRecorder.start(100) // Collect data every 100ms
       console.log('[Voice] Recording started')
+
+      // Add silence detection
+      this.setupSilenceDetection()
     } catch (error) {
       console.error('[Voice] Failed to start recording:', error)
       throw new Error('Microphone access denied or unavailable')
     }
+  }
+
+  private silenceTimer: NodeJS.Timeout | null = null
+  private onSilenceDetected: (() => void) | null = null
+
+  setOnSilenceDetected(callback: () => void) {
+    this.onSilenceDetected = callback
+  }
+
+  private setupSilenceDetection() {
+    if (!this.stream) return
+
+    const audioContext = new AudioContext()
+    const source = audioContext.createMediaStreamSource(this.stream)
+    const analyser = audioContext.createAnalyser()
+    analyser.fftSize = 256
+    source.connect(analyser)
+
+    const bufferLength = analyser.frequencyBinCount
+    const dataArray = new Uint8Array(bufferLength)
+
+    const checkSilence = () => {
+      if (!this.isRecording) {
+        audioContext.close()
+        return
+      }
+
+      analyser.getByteFrequencyData(dataArray)
+      const volume = dataArray.reduce((a, b) => a + b) / bufferLength
+
+      // Threshold for silence (very low amplitude)
+      if (volume < 5) { // Adjusted for noise
+        if (!this.silenceTimer) {
+          this.silenceTimer = setTimeout(() => {
+            console.log('[Voice] Silence detected, auto-stopping...')
+            this.onSilenceDetected?.()
+      }, 800) // 0.8 seconds of silence
+        }
+      } else {
+        if (this.silenceTimer) {
+          clearTimeout(this.silenceTimer)
+          this.silenceTimer = null
+        }
+      }
+
+      requestAnimationFrame(checkSilence)
+    }
+
+    checkSilence()
   }
 
   async stop(): Promise<Blob> {
@@ -63,17 +115,17 @@ export class AudioRecorder {
       }
 
       this.mediaRecorder.onstop = () => {
-        const audioBlob = new Blob(this.audioChunks, { 
-          type: this.getSupportedMimeType() 
+        const audioBlob = new Blob(this.audioChunks, {
+          type: this.getSupportedMimeType()
         })
         console.log('[Voice] Recording stopped, blob size:', audioBlob.size)
-        
+
         // Clean up stream
         if (this.stream) {
           this.stream.getTracks().forEach(track => track.stop())
           this.stream = null
         }
-        
+
         resolve(audioBlob)
       }
 
@@ -105,13 +157,13 @@ export class AudioRecorder {
       'audio/ogg;codecs=opus',
       'audio/wav',
     ]
-    
+
     for (const type of types) {
       if (MediaRecorder.isTypeSupported(type)) {
         return type
       }
     }
-    
+
     return 'audio/webm' // Fallback
   }
 }
@@ -143,11 +195,11 @@ class WhisperClient {
 
   async transcribe(audioBlob: Blob): Promise<TranscriptionResult> {
     const formData = new FormData()
-    
+
     // Convert blob to file with proper extension
     const extension = this.getExtensionFromMimeType(audioBlob.type)
     const audioFile = new File([audioBlob], `audio.${extension}`, { type: audioBlob.type })
-    
+
     formData.append('file', audioFile)
     formData.append('model', 'whisper-1')
     formData.append('language', this.language)
@@ -172,7 +224,7 @@ class WhisperClient {
 
       const result = await response.json()
       console.log('[Whisper] Transcription result:', result)
-      
+
       return {
         text: result.text || '',
         duration: result.duration,
@@ -205,17 +257,68 @@ class OpenRouterAudioClient {
   }
 
   async transcribe(audioBlob: Blob): Promise<TranscriptionResult> {
-    // Convert audio to base64
-    const audioBase64 = await blobToBase64(audioBlob)
     const mimeType = audioBlob.type || 'audio/webm'
 
-    console.log('[OpenRouter] Sending audio to', this.model, 'format:', this.getAudioFormat(mimeType))
+    // For OpenRouter, always use Chat Completions with audio input
+    // because they don't support the dedicated /audio/transcriptions endpoint yet.
+    // Ensure we use a valid model for the chat endpoint
+    const modelToUse = this.model.includes('whisper') ? 'openai/gpt-audio-mini' : this.model
+    return this.transcribeWithChatEndpoint(audioBlob, mimeType, modelToUse)
+  }
 
-    // OpenRouter/OpenAI Audio models - we only want text output for transcription
-    // Using just text modality to avoid streaming requirement for audio output
+  // Method kept for internal routing but unused for now as we use Chat endpoint for all OpenRouter models
+  private async transcribeWithWhisperEndpoint(audioBlob: Blob): Promise<TranscriptionResult> {
+    const formData = new FormData()
+
+    // Convert blob to file with proper extension
+    // Whisper loves .webm or .wav
+    const audioFile = new File([audioBlob], `audio.webm`, { type: audioBlob.type })
+
+    formData.append('file', audioFile)
+    formData.append('model', this.model)
+    formData.append('language', this.language)
+    formData.append('response_format', 'json')
+
+    console.log('[OpenRouter] Sending audio to Whisper endpoint:', this.model)
+
+    try {
+      const response = await fetch('https://openrouter.ai/api/v1/audio/transcriptions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${this.apiKey}`,
+        },
+        body: formData,
+      })
+
+      if (!response.ok) {
+        const error = await response.text()
+        console.error('[OpenRouter] Whisper API error:', response.status, error)
+        throw new Error(`Whisper transcription failed: ${response.status}`)
+      }
+
+      const result = await response.json()
+      console.log('[OpenRouter] Whisper result:', result)
+
+      return {
+        text: result.text || '',
+      }
+    } catch (error) {
+      console.error('[OpenRouter] Whisper error:', error)
+      throw error
+    }
+  }
+
+  private async transcribeWithChatEndpoint(audioBlob: Blob, _mimeType: string, modelToUse?: string): Promise<TranscriptionResult> {
+    const audioBase64 = await blobToBase64(audioBlob)
+    const model = modelToUse || this.model
+    console.log('[OpenRouter] Sending audio to Chat endpoint:', model, 'format: opus (from webm)')
+
+    // Chat models REQUIRE stream: true if audio modality is present
     const requestBody = {
-      model: this.model,
-      modalities: ['text'], // Only text output - avoids streaming requirement
+      model: model,
+      modalities: ['text', 'audio'],
+      audio: { voice: 'alloy', format: 'pcm16' }, // 'wav' is not supported for streaming, 'pcm16' is
+      stream: true, // MANDATORY for audio models
       messages: [
         {
           role: 'user',
@@ -224,7 +327,7 @@ class OpenRouterAudioClient {
               type: 'input_audio',
               input_audio: {
                 data: audioBase64,
-                format: this.getAudioFormat(mimeType),
+                format: 'opus', // High-end models handle opus in containers well
               },
             },
             {
@@ -243,52 +346,69 @@ class OpenRouterAudioClient {
           'Authorization': `Bearer ${this.apiKey}`,
           'Content-Type': 'application/json',
           'HTTP-Referer': window.location.origin,
-          'X-Title': 'ChefKiosk Voice',
+          'X-Title': 'ChefVoice Kiosk',
         },
         body: JSON.stringify(requestBody),
       })
 
       if (!response.ok) {
         const error = await response.text()
-        console.error('[OpenRouter] API error:', response.status, error)
-        throw new Error(`Transcription failed: ${response.status} - ${error}`)
+        console.error('[OpenRouter] Chat API error:', response.status, error)
+        throw new Error(`Chat transcription failed: ${response.status} - ${error}`)
       }
 
-      const result = await response.json()
-      console.log('[OpenRouter] Response:', result)
-      
-      // Extract text from chat completion response
-      // The response may have content as a string or as an array with audio parts
-      const message = result.choices?.[0]?.message
+      // Handle streaming response to extract text
+      const reader = response.body?.getReader()
+      if (!reader) throw new Error('No response body')
+
+      const decoder = new TextDecoder()
       let text = ''
-      
-      if (typeof message?.content === 'string') {
-        text = message.content
-      } else if (Array.isArray(message?.content)) {
-        // Find text content in array
-        const textPart = message.content.find((p: any) => p.type === 'text')
-        text = textPart?.text || ''
+      let done = false
+
+      while (!done) {
+        const { value, done: readerDone } = await reader.read()
+        done = readerDone
+
+        if (value) {
+          const chunk = decoder.decode(value, { stream: !done })
+          const lines = chunk.split('\n').filter(line => line.trim().startsWith('data:'))
+
+          for (const line of lines) {
+            const dataString = line.replace(/^data: /, '').trim()
+            if (dataString === '[DONE]') continue
+
+            try {
+              const parsed = JSON.parse(dataString)
+              const delta = parsed.choices?.[0]?.delta
+
+              // Handle standard content delta
+              if (delta?.content) {
+                text += typeof delta.content === 'string' ? delta.content : ''
+              }
+              // Handle gpt-audio transcript delta
+              else if (delta?.audio?.transcript) {
+                text += delta.audio.transcript
+              }
+              // Handle gpt-audio-mini specific transcript field if any
+              else if (parsed.choices?.[0]?.message?.audio?.transcript) {
+                text += parsed.choices[0].message.audio.transcript
+              }
+            } catch (e) { /* skip partial lines */ }
+          }
+        }
       }
-      
+
+      console.log('[OpenRouter] Chat transcription complete:', text)
+
       return {
         text: text.trim(),
       }
     } catch (error) {
-      console.error('[OpenRouter] Transcription error:', error)
+      console.error('[OpenRouter] Chat error:', error)
       throw error
     }
   }
 
-  private getAudioFormat(mimeType: string): string {
-    // OpenAI/OpenRouter expects specific format strings
-    if (mimeType.includes('webm')) return 'webm'
-    if (mimeType.includes('mp4') || mimeType.includes('m4a')) return 'mp4'
-    if (mimeType.includes('ogg')) return 'ogg'
-    if (mimeType.includes('wav')) return 'wav'
-    if (mimeType.includes('mp3')) return 'mp3'
-    if (mimeType.includes('flac')) return 'flac'
-    return 'webm'
-  }
 }
 
 // Combined service for voice recognition
@@ -304,10 +424,14 @@ export class VoiceRecognitionService {
   }
 
   initialize(config: VoiceConfig): void {
+    console.log('[VoiceService] Initializing with provider:', config.provider)
+    console.log('[VoiceService] Model:', config.model || 'default')
+    console.log('[VoiceService] Language:', config.language)
+    
     if (config.provider === 'openai') {
       this.whisperClient = new WhisperClient(config.apiKey, config.language)
       this.activeProvider = 'openai'
-      console.log('[Voice] Initialized with OpenAI Whisper')
+      console.log('[VoiceService] ✅ Initialized with OpenAI Whisper')
     } else if (config.provider === 'openrouter') {
       this.openRouterClient = new OpenRouterAudioClient(
         config.apiKey,
@@ -315,7 +439,7 @@ export class VoiceRecognitionService {
         config.language
       )
       this.activeProvider = 'openrouter'
-      console.log('[Voice] Initialized with OpenRouter', config.model)
+      console.log('[VoiceService] ✅ Initialized with OpenRouter:', config.model)
     }
     this.isInitialized = true
   }
@@ -332,28 +456,46 @@ export class VoiceRecognitionService {
     return this.recorder.isRecording
   }
 
+  setOnSilenceDetected(callback: () => void): void {
+    this.recorder.setOnSilenceDetected(callback)
+  }
+
   async startRecording(): Promise<void> {
+    console.log('[VoiceService] startRecording called')
+    console.log('[VoiceService] isConfigured:', this.isConfigured)
+    console.log('[VoiceService] activeProvider:', this.activeProvider)
+    
     if (!this.isConfigured) {
+      console.error('[VoiceService] Not configured!')
       throw new Error('Voice service not configured. Please set API key in Settings.')
     }
+    console.log('[VoiceService] Starting AudioRecorder...')
     await this.recorder.start()
+    console.log('[VoiceService] AudioRecorder started successfully')
   }
 
   async stopAndTranscribe(): Promise<string> {
+    console.log('[VoiceService] stopAndTranscribe called')
     const audioBlob = await this.recorder.stop()
-    
+    console.log('[VoiceService] Audio blob size:', audioBlob.size, 'bytes')
+
     // Check if we have enough audio
     if (audioBlob.size < 1000) {
-      console.log('[Voice] Audio too short, skipping transcription')
+      console.log('[VoiceService] Audio too short, skipping transcription')
       return ''
     }
 
     // Use appropriate client
+    console.log('[VoiceService] Using provider:', this.activeProvider)
     if (this.activeProvider === 'openai' && this.whisperClient) {
+      console.log('[VoiceService] Sending to OpenAI Whisper...')
       const result = await this.whisperClient.transcribe(audioBlob)
+      console.log('[VoiceService] OpenAI result:', result.text)
       return result.text
     } else if (this.activeProvider === 'openrouter' && this.openRouterClient) {
+      console.log('[VoiceService] Sending to OpenRouter...')
       const result = await this.openRouterClient.transcribe(audioBlob)
+      console.log('[VoiceService] OpenRouter result:', result.text)
       return result.text
     }
 

@@ -17,8 +17,9 @@ import { GoodsReceiptScreen } from '@/components/receipt/GoodsReceiptScreen'
 // Lazy load only auth/onboarding screens (used less frequently)
 const LandingPage = lazy(() => import('@/components/landing/LandingPage').then(m => ({ default: m.LandingPage })))
 const OnboardingQuestionnaire = lazy(() => import('@/components/onboarding/OnboardingQuestionnaire').then(m => ({ default: m.OnboardingQuestionnaire })))
-import { supabase, isSupabaseConfigured } from '@/lib/supabase'
-import { getStaffMembers } from '@/services/settingsService'
+import { supabase, isSupabaseConfigured, DEMO_SITE_ID } from '@/lib/supabase'
+import { getStaffMembers, getSiteSettings } from '@/services/settingsService'
+import { fetchCoolingSessions } from '@/services/coolingService'
 import type { Site } from '@/types'
 import type { User, Session } from '@supabase/supabase-js'
 
@@ -36,9 +37,9 @@ type Screen = 'home' | 'history' | 'settings' | 'compliance' | 'reports' | 'venu
 
 // Fallback demo site (used when Supabase not available)
 const FALLBACK_DEMO_SITE: Site = {
-  id: 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11',
-  name: 'Demo Kitchen',
-  address: '123 Restaurant Street',
+  id: DEMO_SITE_ID,
+  name: 'Luma Executive Kitchen',
+  address: 'Grand Canal Dock, Dublin 2, Ireland',
   created_at: new Date().toISOString(),
   updated_at: new Date().toISOString(),
 }
@@ -49,12 +50,13 @@ function AppContent() {
   const [currentScreen, setCurrentScreen] = useState<Screen>('home')
   const [authState, setAuthState] = useState<AuthState>('loading')
   const [user, setUser] = useState<User | null>(null)
-  const { setCurrentSite, setIsOnline, currentSite, settings, updateSettings, setStaffMembers } = useAppStore()
+  const [showLanding, setShowLanding] = useState(true)
+  const { setCurrentSite, setIsOnline, currentSite, settings, updateSettings, setStaffMembers, setCoolingSessions, setIsDemo, isDemo } = useAppStore()
 
   // Main authentication effect - runs once on mount
   useEffect(() => {
     // Skip auth check if we're in demo mode
-    if (authState === 'demo') {
+    if (authState === 'demo' || isDemo) {
       console.log('🎮 In demo mode - skipping auth check')
       return
     }
@@ -67,12 +69,12 @@ function AppContent() {
 
     let mounted = true
     let authStateRef: AuthState = authState // Track state locally to avoid stale closure
-    
+
     // Skip if already determined (not loading)
     if (authState !== 'loading') {
       return
     }
-    
+
     // Timeout to prevent infinite loading - show landing after 1.5 seconds
     const loadingTimeout = setTimeout(() => {
       if (mounted && authStateRef === 'loading') {
@@ -85,18 +87,18 @@ function AppContent() {
     // Function to check profile and determine auth state
     const checkProfileAndSetState = async (session: Session) => {
       if (!mounted) return
-      
+
       try {
         const { data: profile, error } = await supabase
           .from('profiles')
           .select('onboarding_completed')
           .eq('id', session.user.id)
           .maybeSingle() as { data: { onboarding_completed: boolean } | null; error: any }
-        
+
         if (!mounted) return
-        
+
         console.log('👤 Profile check:', { profile, error })
-        
+
         if (error || !profile || !profile.onboarding_completed) {
           setAuthState('onboarding')
           authStateRef = 'onboarding'
@@ -116,18 +118,18 @@ function AppContent() {
     // Initial session check
     const initAuth = async () => {
       console.log('🔍 Initializing auth...')
-      
+
       try {
         const { data: { session }, error } = await supabase.auth.getSession()
-        
+
         if (!mounted) return
-        
-        console.log('📊 Initial session:', { 
-          hasSession: !!session, 
+
+        console.log('📊 Initial session:', {
+          hasSession: !!session,
           email: session?.user?.email,
-          error: error?.message 
+          error: error?.message
         })
-        
+
         if (session?.user) {
           setUser(session.user)
           await checkProfileAndSetState(session)
@@ -150,15 +152,15 @@ function AppContent() {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
         console.log('🔄 Auth event:', event, session?.user?.email)
-        
+
         if (!mounted) return
-        
+
         // Don't change state if we're in demo mode
         if (authStateRef === 'demo') {
           console.log('🎮 In demo mode - ignoring auth event')
           return
         }
-        
+
         if (event === 'SIGNED_IN' && session?.user) {
           setUser(session.user)
           await checkProfileAndSetState(session)
@@ -240,7 +242,7 @@ function AppContent() {
               created_at: venue.created_at || new Date().toISOString(),
               updated_at: venue.updated_at || new Date().toISOString(),
             })
-            
+
             if (venue.subscription_tier) {
               updateSettings({ subscriptionTier: venue.subscription_tier as 'basic' | 'pro' | 'enterprise' })
             }
@@ -268,7 +270,7 @@ function AppContent() {
             created_at: ownedVenue.created_at || new Date().toISOString(),
             updated_at: ownedVenue.updated_at || new Date().toISOString(),
           })
-          
+
           if (ownedVenue.subscription_tier) {
             updateSettings({ subscriptionTier: ownedVenue.subscription_tier as 'basic' | 'pro' | 'enterprise' })
           }
@@ -290,7 +292,7 @@ function AppContent() {
   useEffect(() => {
     if (!currentSite?.id) return
 
-    const loadStaff = async () => {
+    const loadStaffAndCooling = async () => {
       try {
         const staffData = await getStaffMembers(currentSite.id)
         setStaffMembers(staffData.map(s => ({
@@ -300,15 +302,53 @@ function AppContent() {
           role: s.role as 'manager' | 'chef' | 'staff',
           active: s.active ?? true,
           site_id: s.site_id,
+          staff_code: s.staff_code ?? null,
           created_at: s.created_at,
         })))
       } catch (err) {
         console.warn('Failed to fetch staff:', err)
       }
+
+      try {
+        const sessions = await fetchCoolingSessions(currentSite.id)
+        setCoolingSessions(sessions)
+      } catch (err) {
+        console.warn('Failed to fetch cooling sessions:', err)
+      }
     }
 
-    loadStaff()
-  }, [currentSite?.id, setStaffMembers])
+    loadStaffAndCooling()
+  }, [currentSite?.id, setStaffMembers, setCoolingSessions])
+
+  // Load site settings (API keys + preferences) when site changes
+  useEffect(() => {
+    if (!currentSite?.id) return
+
+    const loadSiteSettings = async () => {
+      try {
+        const settingsRecord = await getSiteSettings(currentSite.id)
+        if (!settingsRecord) return
+
+        updateSettings({
+          theme: (settingsRecord.theme as 'day' | 'night') || settings.theme,
+          language: settingsRecord.language || settings.language,
+          voiceProvider: (settingsRecord.voice_provider as 'browser' | 'openai' | 'openrouter') || settings.voiceProvider,
+          audioModel: (settingsRecord.audio_model as any) || settings.audioModel,
+          openaiApiKey: settingsRecord.openai_api_key ?? settings.openaiApiKey,
+          openrouterApiKey: settingsRecord.openrouter_api_key ?? settings.openrouterApiKey,
+          ocrProvider: (settingsRecord.ocr_provider as any) || settings.ocrProvider,
+          ocrModel: (settingsRecord.ocr_model as any) || settings.ocrModel,
+          ttsEnabled: settingsRecord.tts_enabled ?? settings.ttsEnabled,
+          wakeWordEnabled: settingsRecord.wake_word_enabled ?? settings.wakeWordEnabled,
+          activeWakeWords: settingsRecord.active_wake_words ?? settings.activeWakeWords,
+        })
+      } catch (error) {
+        console.warn('Failed to load site settings:', error)
+      }
+    }
+
+    loadSiteSettings()
+  }, [currentSite?.id])
 
   // Monitor online/offline status
   useEffect(() => {
@@ -336,6 +376,7 @@ function AppContent() {
   const handleLogout = async () => {
     console.log('🚪 Logging out...')
     await supabase.auth.signOut()
+    setShowLanding(true)
   }
 
   // Handle onboarding complete
@@ -343,42 +384,105 @@ function AppContent() {
     setAuthState('authenticated')
   }
 
-  // Handle demo mode start
-  const handleDemoStart = () => {
-    console.log('🎮 Starting Demo Mode')
-    
-    // Set demo site data
-    const DEMO_SITE = {
-      id: 'demo-site-123',
-      name: 'Demo Restaurant',
-      address: '123 Demo Street, Dublin, Ireland',
-      kiosk_pin: '1234',
-      alert_email: 'demo@example.com',
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    }
-    
-    setCurrentSite(DEMO_SITE)
-    
-    // Set demo staff members
-    setStaffMembers([
-      { id: 'demo-staff-1', name: 'John Chef', initials: 'JC', role: 'chef', active: true, site_id: 'demo-site-123', created_at: new Date().toISOString() },
-      { id: 'demo-staff-2', name: 'Mary Manager', initials: 'MM', role: 'manager', active: true, site_id: 'demo-site-123', created_at: new Date().toISOString() },
-      { id: 'demo-staff-3', name: 'Sam Staff', initials: 'SS', role: 'staff', active: true, site_id: 'demo-site-123', created_at: new Date().toISOString() },
-    ])
-    
-    // Update settings for demo
+  // Handle demo mode start - Auto login with persistent demo user
+  const handleDemoStart = async () => {
+    console.log('🎮 Starting Demo Mode - Auto Login')
+    setShowLanding(false)
+
+    // Enter demo mode immediately to avoid loading limbo
+    const { resetDataLoaded, setCurrentSite, updateSettings, setStaffMembers, setCoolingSessions, setIsDemo } = useAppStore.getState()
+    setIsDemo(true)
+
+    // Clear everything first to avoid site leakage
+    resetDataLoaded()
+    setCurrentSite(FALLBACK_DEMO_SITE)
     updateSettings({ subscriptionTier: 'pro' })
-    
     setAuthState('demo')
+
+    if (!isSupabaseConfigured()) {
+      console.warn('Supabase not configured - staying in offline demo mode')
+      return
+    }
+
+    try {
+      // Sign in with persistent demo credentials
+      // Note: We attempt login but proceed even on failure (fallback to anon key + demo RLS)
+      // This bypasses transient Supabase Auth 500 errors like 'Database error querying schema'
+      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+        email: 'demo@chefvoice.app',
+        password: 'demo123!@#',
+      })
+
+      if (authError) {
+        console.warn('⚠️ Demo authentication failed, proceeding with anon-bypass:', authError.message)
+      } else {
+        console.log('✅ Demo user authenticated:', authData.user?.email)
+      }
+
+      // Small delay to ensure session/headers are ready if login succeeded
+      await new Promise(resolve => setTimeout(resolve, 300))
+
+      try {
+        const [settingsRecord, staffData, sessions] = await Promise.all([
+          getSiteSettings(FALLBACK_DEMO_SITE.id),
+          getStaffMembers(FALLBACK_DEMO_SITE.id),
+          fetchCoolingSessions(FALLBACK_DEMO_SITE.id)
+        ])
+
+        if (settingsRecord) {
+          updateSettings({
+            theme: (settingsRecord.theme as 'day' | 'night') || settings.theme,
+            language: settingsRecord.language || settings.language,
+            voiceProvider: (settingsRecord.voice_provider as 'browser' | 'openai' | 'openrouter') || settings.voiceProvider,
+            audioModel: (settingsRecord.audio_model as any) || settings.audioModel,
+            openaiApiKey: settingsRecord.openai_api_key ?? settings.openaiApiKey,
+            openrouterApiKey: settingsRecord.openrouter_api_key ?? settings.openrouterApiKey,
+            ocrProvider: (settingsRecord.ocr_provider as any) || settings.ocrProvider,
+            ocrModel: (settingsRecord.ocr_model as any) || settings.ocrModel,
+            ttsEnabled: settingsRecord.tts_enabled ?? settings.ttsEnabled,
+            wakeWordEnabled: settingsRecord.wake_word_enabled ?? settings.wakeWordEnabled,
+            activeWakeWords: settingsRecord.active_wake_words ?? settings.activeWakeWords,
+          })
+        }
+
+        if (staffData && staffData.length > 0) {
+          console.log(`👥 Loaded ${staffData.length} demo staff members`)
+          setStaffMembers(
+            staffData.map((staff) => ({
+              id: staff.id,
+              name: staff.name,
+              initials: staff.initials || staff.name.substring(0, 2).toUpperCase(),
+              role: staff.role as 'manager' | 'chef' | 'staff',
+              active: staff.active ?? true,
+              site_id: staff.site_id,
+              staff_code: staff.staff_code ?? null,
+              created_at: staff.created_at,
+            }))
+          )
+        } else {
+          console.warn('⚠️ No demo staff found in database')
+        }
+
+        if (sessions) {
+          console.log(`❄️ Loaded ${sessions.length} demo cooling sessions`)
+          setCoolingSessions(sessions)
+        }
+      } catch (err) {
+        console.warn('Failed to load demo site data:', err)
+      }
+    } catch (err) {
+      console.error('Demo mode error:', err)
+    }
   }
 
   // Handle exit demo
   const handleExitDemo = () => {
     console.log('🚪 Exiting Demo Mode')
+    setIsDemo(false)
     setAuthState('unauthenticated')
     setCurrentSite(null as any)
     setStaffMembers([])
+    setShowLanding(true)
   }
 
   // Render current screen content (without layout wrapper - MainLayout handles that)
@@ -416,11 +520,11 @@ function AppContent() {
     if (currentScreen === 'home') {
       return renderScreenContent()
     }
-    
+
     // Other screens get wrapped in MainLayout for consistent sidebar on desktop
     return (
-      <MainLayout 
-        currentScreen={currentScreen} 
+      <MainLayout
+        currentScreen={currentScreen}
         onNavigate={handleNavigate}
       >
         {renderScreenContent()}
@@ -429,21 +533,21 @@ function AppContent() {
   }
 
   // Toast styles
-  const toastStyle = settings.theme === 'day' 
+  const toastStyle = settings.theme === 'day'
     ? {
-        background: '#ffffff',
-        color: '#1e293b',
-        border: '1px solid #e2e8f0',
-        borderRadius: '0.875rem',
-        boxShadow: '0 4px 20px rgba(0, 0, 0, 0.08)',
-      }
+      background: '#ffffff',
+      color: '#1e293b',
+      border: '1px solid #e2e8f0',
+      borderRadius: '0.875rem',
+      boxShadow: '0 4px 20px rgba(0, 0, 0, 0.08)',
+    }
     : {
-        background: '#1e293b',
-        color: '#f8fafc',
-        border: '1px solid #334155',
-        borderRadius: '0.875rem',
-        boxShadow: '0 4px 20px rgba(0, 0, 0, 0.3)',
-      }
+      background: '#1e293b',
+      color: '#f8fafc',
+      border: '1px solid #334155',
+      borderRadius: '0.875rem',
+      boxShadow: '0 4px 20px rgba(0, 0, 0, 0.3)',
+    }
 
   // Loading state
   if (authState === 'loading') {
@@ -467,12 +571,28 @@ function AppContent() {
     </div>
   )
 
+  // Always show landing first
+  if (showLanding) {
+    const shouldShowContinue = authState !== 'unauthenticated'
+    return (
+      <>
+        <Suspense fallback={<LoadingFallback />}>
+          <LandingPage
+            onSignIn={shouldShowContinue ? () => setShowLanding(false) : undefined}
+            onDemoStart={handleDemoStart}
+          />
+        </Suspense>
+        <Toaster position="top-center" toastOptions={{ style: toastStyle }} />
+      </>
+    )
+  }
+
   // Unauthenticated - show landing
   if (authState === 'unauthenticated') {
     return (
       <>
         <Suspense fallback={<LoadingFallback />}>
-          <LandingPage onSignIn={() => {}} onDemoStart={handleDemoStart} />
+          <LandingPage onSignIn={() => { }} onDemoStart={handleDemoStart} />
         </Suspense>
         <Toaster position="top-center" toastOptions={{ style: toastStyle }} />
       </>
@@ -481,11 +601,17 @@ function AppContent() {
 
   // Demo mode - show dashboard with demo banner (no Suspense - screens are direct imports)
   if (authState === 'demo') {
+    // Ensure demo mode always uses the correct site ID (in case of stale localStorage)
+    if (currentSite?.id !== FALLBACK_DEMO_SITE.id) {
+      console.log('🔄 Fixing demo site ID:', currentSite?.id, '→', FALLBACK_DEMO_SITE.id)
+      setCurrentSite(FALLBACK_DEMO_SITE)
+    }
+
     return (
       <>
         {/* Demo Banner */}
-        <div className="fixed top-0 left-0 right-0 z-[60] bg-amber-500 text-black py-2 px-4 text-center text-sm font-semibold">
-          🎮 Demo Mode - Explore freely! Data won't be saved.
+        <div className="fixed top-0 left-0 right-0 z-[60] bg-emerald-500 text-white py-2 px-4 text-center text-sm font-semibold">
+          🎮 Demo Mode - Explore freely! Data saves to demo database.
           <button
             onClick={handleExitDemo}
             className="ml-4 px-3 py-1 bg-black/20 rounded-lg hover:bg-black/30 transition-colors"

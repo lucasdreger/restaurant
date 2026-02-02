@@ -13,7 +13,7 @@ interface LandingPageProps {
   onDemoStart?: () => void
 }
 
-export function LandingPage({ onSignIn: _onSignIn, onDemoStart }: LandingPageProps) {
+export function LandingPage({ onSignIn, onDemoStart }: LandingPageProps) {
   const [isSignUpOpen, setIsSignUpOpen] = useState(false)
   const [isSignInOpen, setIsSignInOpen] = useState(false)
   const [selectedTier, setSelectedTier] = useState<'tier1' | 'tier2' | 'tier3'>('tier2')
@@ -31,6 +31,14 @@ export function LandingPage({ onSignIn: _onSignIn, onDemoStart }: LandingPagePro
               <span className="text-xl font-bold">ChefVoice</span>
             </div>
             <div className="flex items-center gap-4">
+              {onSignIn && (
+                <button
+                  onClick={onSignIn}
+                  className="px-4 py-2 text-sm text-emerald-400 hover:text-emerald-300 transition-colors"
+                >
+                  Continue
+                </button>
+              )}
               <button 
                 onClick={() => setIsSignInOpen(true)}
                 className="px-4 py-2 text-sm text-slate-300 hover:text-white transition-colors"

@@ -10,11 +10,6 @@ export type Json =
   | Json[]
 
 export type Database = {
-  // Allows to automatically instantiate createClient with right options
-  // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
-  __InternalSupabase: {
-    PostgrestVersion: "14.1"
-  }
   public: {
     Tables: {
       alerts: {
@@ -347,6 +342,7 @@ export type Database = {
           role: 'manager' | 'chef' | 'staff'
           initials: string | null
           pin: string | null
+          staff_code: string | null
           active: boolean | null
           email: string | null
           created_at: string
@@ -359,6 +355,7 @@ export type Database = {
           role?: 'manager' | 'chef' | 'staff'
           initials?: string | null
           pin?: string | null
+          staff_code?: string | null
           active?: boolean | null
           email?: string | null
           created_at?: string
@@ -371,6 +368,7 @@ export type Database = {
           role?: 'manager' | 'chef' | 'staff'
           initials?: string | null
           pin?: string | null
+          staff_code?: string | null
           active?: boolean | null
           email?: string | null
           created_at?: string
@@ -756,6 +754,80 @@ export type Database = {
           },
         ]
       }
+      delivery_images: {
+        Row: {
+          id: string
+          receipt_id: string
+          image_type: 'delivery_note' | 'protein_label' | 'temperature_log' | 'other'
+          storage_path: string
+          original_filename: string | null
+          compressed_size_bytes: number | null
+          original_size_bytes: number | null
+          mime_type: string | null
+          page_number: number | null
+          description: string | null
+          product_name: string | null
+          batch_number: string | null
+          use_by_date: string | null
+          supplier_code: string | null
+          ocr_processed: boolean | null
+          ocr_text: string | null
+          captured_at: string | null
+          created_at: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          id?: string
+          receipt_id: string
+          image_type: 'delivery_note' | 'protein_label' | 'temperature_log' | 'other'
+          storage_path: string
+          original_filename?: string | null
+          compressed_size_bytes?: number | null
+          original_size_bytes?: number | null
+          mime_type?: string | null
+          page_number?: number | null
+          description?: string | null
+          product_name?: string | null
+          batch_number?: string | null
+          use_by_date?: string | null
+          supplier_code?: string | null
+          ocr_processed?: boolean | null
+          ocr_text?: string | null
+          captured_at?: string | null
+          created_at?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          id?: string
+          receipt_id?: string
+          image_type?: 'delivery_note' | 'protein_label' | 'temperature_log' | 'other'
+          storage_path?: string
+          original_filename?: string | null
+          compressed_size_bytes?: number | null
+          original_size_bytes?: number | null
+          mime_type?: string | null
+          page_number?: number | null
+          description?: string | null
+          product_name?: string | null
+          batch_number?: string | null
+          use_by_date?: string | null
+          supplier_code?: string | null
+          ocr_processed?: boolean | null
+          ocr_text?: string | null
+          captured_at?: string | null
+          created_at?: string | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "delivery_images_receipt_id_fkey"
+            columns: ["receipt_id"]
+            isOneToOne: false
+            referencedRelation: "goods_receipts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
@@ -772,122 +844,10 @@ export type Database = {
   }
 }
 
-type DatabaseWithoutInternals = Omit<Database, "__InternalSupabase">
-
-type DefaultSchema = DatabaseWithoutInternals[Extract<keyof Database, "public">]
-
-export type Tables<
-  DefaultSchemaTableNameOrOptions extends
-    | keyof (DefaultSchema["Tables"] & DefaultSchema["Views"])
-    | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
-    schema: keyof DatabaseWithoutInternals
-  }
-    ? keyof (DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
-        DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Views"])
-    : never = never,
-> = DefaultSchemaTableNameOrOptions extends {
-  schema: keyof DatabaseWithoutInternals
-}
-  ? (DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
-      DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Views"])[TableName] extends {
-      Row: infer R
-    }
-    ? R
-    : never
-  : DefaultSchemaTableNameOrOptions extends keyof (DefaultSchema["Tables"] &
-        DefaultSchema["Views"])
-    ? (DefaultSchema["Tables"] &
-        DefaultSchema["Views"])[DefaultSchemaTableNameOrOptions] extends {
-        Row: infer R
-      }
-      ? R
-      : never
-    : never
-
-export type TablesInsert<
-  DefaultSchemaTableNameOrOptions extends
-    | keyof DefaultSchema["Tables"]
-    | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
-    schema: keyof DatabaseWithoutInternals
-  }
-    ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-    : never = never,
-> = DefaultSchemaTableNameOrOptions extends {
-  schema: keyof DatabaseWithoutInternals
-}
-  ? DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"][TableName] extends {
-      Insert: infer I
-    }
-    ? I
-    : never
-  : DefaultSchemaTableNameOrOptions extends keyof DefaultSchema["Tables"]
-    ? DefaultSchema["Tables"][DefaultSchemaTableNameOrOptions] extends {
-        Insert: infer I
-      }
-      ? I
-      : never
-    : never
-
-export type TablesUpdate<
-  DefaultSchemaTableNameOrOptions extends
-    | keyof DefaultSchema["Tables"]
-    | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
-    schema: keyof DatabaseWithoutInternals
-  }
-    ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-    : never = never,
-> = DefaultSchemaTableNameOrOptions extends {
-  schema: keyof DatabaseWithoutInternals
-}
-  ? DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"][TableName] extends {
-      Update: infer U
-    }
-    ? U
-    : never
-  : DefaultSchemaTableNameOrOptions extends keyof DefaultSchema["Tables"]
-    ? DefaultSchema["Tables"][DefaultSchemaTableNameOrOptions] extends {
-        Update: infer U
-      }
-      ? U
-      : never
-    : never
-
-export type Enums<
-  DefaultSchemaEnumNameOrOptions extends
-    | keyof DefaultSchema["Enums"]
-    | { schema: keyof DatabaseWithoutInternals },
-  EnumName extends DefaultSchemaEnumNameOrOptions extends {
-    schema: keyof DatabaseWithoutInternals
-  }
-    ? keyof DatabaseWithoutInternals[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"]
-    : never = never,
-> = DefaultSchemaEnumNameOrOptions extends {
-  schema: keyof DatabaseWithoutInternals
-}
-  ? DatabaseWithoutInternals[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"][EnumName]
-  : DefaultSchemaEnumNameOrOptions extends keyof DefaultSchema["Enums"]
-    ? DefaultSchema["Enums"][DefaultSchemaEnumNameOrOptions]
-    : never
-
-export type CompositeTypes<
-  PublicCompositeTypeNameOrOptions extends
-    | keyof DefaultSchema["CompositeTypes"]
-    | { schema: keyof DatabaseWithoutInternals },
-  CompositeTypeName extends PublicCompositeTypeNameOrOptions extends {
-    schema: keyof DatabaseWithoutInternals
-  }
-    ? keyof DatabaseWithoutInternals[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"]
-    : never = never,
-> = PublicCompositeTypeNameOrOptions extends {
-  schema: keyof DatabaseWithoutInternals
-}
-  ? DatabaseWithoutInternals[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"][CompositeTypeName]
-  : PublicCompositeTypeNameOrOptions extends keyof DefaultSchema["CompositeTypes"]
-    ? DefaultSchema["CompositeTypes"][PublicCompositeTypeNameOrOptions]
-    : never
+// Simplified type helpers
+export type Tables<T extends keyof Database["public"]["Tables"]> = Database["public"]["Tables"][T]["Row"]
+export type TablesInsert<T extends keyof Database["public"]["Tables"]> = Database["public"]["Tables"][T]["Insert"]
+export type TablesUpdate<T extends keyof Database["public"]["Tables"]> = Database["public"]["Tables"][T]["Update"]
 
 // Convenience type aliases for kitchen compliance
 export type Site = Tables<'sites'>
@@ -904,6 +864,7 @@ export type GoodsReceiptItem = Tables<'goods_receipt_items'>
 export type Venue = Tables<'venues'>
 export type Profile = Tables<'profiles'>
 export type VenueMember = Tables<'venue_members'>
+export type DeliveryImage = Tables<'delivery_images'>
 
 // Insert types
 export type StaffMemberInsert = TablesInsert<'staff_members'>
@@ -915,6 +876,7 @@ export type GoodsReceiptItemInsert = TablesInsert<'goods_receipt_items'>
 export type VenueInsert = TablesInsert<'venues'>
 export type ProfileInsert = TablesInsert<'profiles'>
 export type VenueMemberInsert = TablesInsert<'venue_members'>
+export type DeliveryImageInsert = TablesInsert<'delivery_images'>
 
 // Update types
 export type CoolingSessionUpdate = TablesUpdate<'cooling_sessions'>
