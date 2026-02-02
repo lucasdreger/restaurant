@@ -1,4 +1,4 @@
-it stimport { useCallback, useState, useEffect, useRef } from 'react'
+import { useCallback, useState, useEffect, useRef } from 'react'
 import { useAppStore } from '@/store/useAppStore'
 import { whisperService } from '@/services/whisperService'
 import type { VoiceCommand } from '@/types'

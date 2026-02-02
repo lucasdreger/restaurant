@@ -465,7 +465,40 @@ function AppContent() {
 
         if (sessions) {
           console.log(`❄️ Loaded ${sessions.length} demo cooling sessions`)
-          setCoolingSessions(sessions)
+          // For demo purposes, modify timestamps to show a mix of statuses immediately
+          // This ensures users see both active (blue), warning (amber), and overdue (red) states
+          const now = new Date()
+          const modifiedSessions = sessions.map((session, index) => {
+            // Create a mix of statuses for demo visualization
+            // Index 0: overdue (started 2.5 hours ago)
+            // Index 1: warning (started 1.5 hours ago)
+            // Index 2+: active (started recently)
+            const modifiedSession = { ...session }
+            if (index === 0) {
+              // Overdue - started 150 minutes ago (2.5 hours)
+              const startedAt = new Date(now.getTime() - 150 * 60 * 1000)
+              modifiedSession.started_at = startedAt.toISOString()
+              modifiedSession.soft_due_at = new Date(startedAt.getTime() + 90 * 60 * 1000).toISOString()
+              modifiedSession.hard_due_at = new Date(startedAt.getTime() + 120 * 60 * 1000).toISOString()
+              modifiedSession.status = 'overdue'
+            } else if (index === 1) {
+              // Warning - started 100 minutes ago (1h 40m)
+              const startedAt = new Date(now.getTime() - 100 * 60 * 1000)
+              modifiedSession.started_at = startedAt.toISOString()
+              modifiedSession.soft_due_at = new Date(startedAt.getTime() + 90 * 60 * 1000).toISOString()
+              modifiedSession.hard_due_at = new Date(startedAt.getTime() + 120 * 60 * 1000).toISOString()
+              modifiedSession.status = 'warning'
+            } else if (index >= 2) {
+              // Active - started recently (within last 30 minutes)
+              const startedAt = new Date(now.getTime() - (10 + index * 5) * 60 * 1000)
+              modifiedSession.started_at = startedAt.toISOString()
+              modifiedSession.soft_due_at = new Date(startedAt.getTime() + 90 * 60 * 1000).toISOString()
+              modifiedSession.hard_due_at = new Date(startedAt.getTime() + 120 * 60 * 1000).toISOString()
+              modifiedSession.status = 'active'
+            }
+            return modifiedSession
+          })
+          setCoolingSessions(modifiedSessions)
         }
       } catch (err) {
         console.warn('Failed to load demo site data:', err)

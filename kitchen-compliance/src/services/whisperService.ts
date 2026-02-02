@@ -92,7 +92,7 @@ export class AudioRecorder {
           this.silenceTimer = setTimeout(() => {
             console.log('[Voice] Silence detected, auto-stopping...')
             this.onSilenceDetected?.()
-      }, 800) // 0.8 seconds of silence
+      }, 400) // Reduced: 0.4 seconds of silence for faster response
         }
       } else {
         if (this.silenceTimer) {

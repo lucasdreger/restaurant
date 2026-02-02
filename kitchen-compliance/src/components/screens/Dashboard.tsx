@@ -89,14 +89,14 @@ export function Dashboard({ onNavigate, currentScreen = 'home' }: DashboardProps
     onCloseModal: () => setCloseModalSessionId(null),
     speak,
     onAwaitingInput: () => {
-      // Delay to ensure React has re-rendered with conversationMode=true
-      // and to avoid mic capturing TTS echo
+      // Minimal delay to ensure React has re-rendered with conversationMode=true
+      // Reduced from 300ms to 100ms for faster response
       setTimeout(() => {
         console.log('[Dashboard] Flow requesting input - triggering mic')
         if (voiceButtonRef.current) {
           voiceButtonRef.current.triggerVoice()
         }
-      }, 300)
+      }, 100)
     }
   })
 
