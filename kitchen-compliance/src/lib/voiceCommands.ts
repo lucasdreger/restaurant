@@ -59,6 +59,19 @@ export function parseVoiceCommand(transcript: string): VoiceCommand {
     }
   }
 
+  // Fridge temperature commands
+  const fridgePatterns = [
+    /^(log|record|check)\s+(fridge|refrigerator|freezer)\s+(temp|temperature)/i,
+    /^(fridge|refrigerator|freezer)\s+(temp|temperature)/i,
+    /^(temp|temperature)\s+(fridge|refrigerator|freezer)/i,
+  ]
+
+  for (const pattern of fridgePatterns) {
+    if (pattern.test(lower)) {
+      return { type: 'log_fridge_temp' }
+    }
+  }
+
   return { type: 'unknown' }
 }
 
@@ -70,6 +83,8 @@ export function getVoiceFeedback(command: VoiceCommand): string | null {
       return 'Okay, closing cooling now.'
     case 'discard':
       return 'Item discarded'
+    case 'log_fridge_temp':
+      return 'Opening fridge temperature logger'
     case 'unknown':
       return "Sorry, I didn't understand that"
     default:

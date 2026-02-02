@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useAppStore } from '@/store/useAppStore'
 import type { VoiceCommand } from '@/types'
 import { parseVoiceCommand } from '@/lib/voiceCommands'
 

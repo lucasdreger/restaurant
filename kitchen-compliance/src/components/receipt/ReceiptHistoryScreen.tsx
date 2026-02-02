@@ -1,6 +1,4 @@
-
 import { useState, useMemo } from 'react'
-import { Link } from 'react-router-dom'
 import {
   ListFilter,
   Package,
@@ -13,22 +11,32 @@ import {
   Download,
   ShieldCheck,
   Zap,
+  FileText,
+  BarChart3,
+  Loader2,
+  ArrowLeft,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useQuery } from '@tanstack/react-query'
 import { useAppStore } from '@/store/useAppStore'
 import {
   listGoodsReceipts,
-  ReceiptStatus,
+  type ReceiptStatus,
   getImagePublicUrl,
-  DeliveryImage,
-  GoodsReceipt,
+  type DeliveryImage,
+  type GoodsReceipt,
+  getGoodsReceiptWithDetails,
 } from '@/services/deliveryService'
+import {
+  generateGoodsReceiptReport,
+  generateSummaryReport,
+  downloadPdfReport,
+} from '@/services/pdfReportService'
 import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/Badge'
 import { Input } from '@/components/ui/Input'
 import { Button } from '@/components/ui/Button'
-import { Card, CardHeader, CardContent } from '@/components/ui/Card'
+import { Card } from '@/components/ui/Card'
 import {
   Select,
   SelectContent,
@@ -100,7 +108,7 @@ function ReceiptCard({ receipt, onClick }: ReceiptCardProps) {
           </h3>
           <p className="text-sm text-theme-muted">
             {receipt.invoiceNumber && `NF: ${receipt.invoiceNumber} | `}
-            Recebido por **{receipt.receivedByName}**
+            Recebido por <strong>{receipt.receivedByName}</strong>
           </p>
         </div>
         <div className="text-right">
@@ -109,9 +117,9 @@ function ReceiptCard({ receipt, onClick }: ReceiptCardProps) {
             {receipt.overallTemperature?.toFixed(1) ?? '--'}°C
           </p>
           {receipt.temperatureCompliant ? (
-            <CheckCircle className="h-5 w-5 text-emerald-500" />
+            <CheckCircle className="h-5 w-5 text-emerald-500 ml-auto" />
           ) : (
-            <AlertTriangle className="h-5 w-5 text-red-500" />
+            <AlertTriangle className="h-5 w-5 text-red-500 ml-auto" />
           )}
         </div>
       </div>
@@ -229,17 +237,8 @@ interface ReceiptDetailModalProps {
 
 function ReceiptDetailModal({ receipt, onClose }: ReceiptDetailModalProps) {
   const [images, setImages] = useState<DeliveryImage[]>([])
-  const { data: detailsData, isLoading: isLoadingDetails } = useQuery({
-    queryKey: ['receiptDetails', receipt?.id],
-    queryFn: () => {
-      if (!receipt?.id) return null
-      return listGoodsReceipts(receipt.id); // This is incorrect, should call getGoodsReceiptWithDetails
-    },
-    enabled: !!receipt,
-  })
-
-  // Re-fetch details with the correct service function
-  const { data: details, isLoading: isLoadingCorrectDetails } = useQuery({
+  
+  const { data: details, isLoading: isLoadingDetails } = useQuery({
     queryKey: ['receiptDetails', receipt?.id],
     queryFn: () => {
       if (!receipt?.id) return null
@@ -248,7 +247,7 @@ function ReceiptDetailModal({ receipt, onClose }: ReceiptDetailModalProps) {
     enabled: !!receipt,
   })
 
-  // useEffect for images
+  // Update images when details load
   useMemo(() => {
     if (details?.images) {
       setImages(details.images)
@@ -257,8 +256,29 @@ function ReceiptDetailModal({ receipt, onClose }: ReceiptDetailModalProps) {
 
   if (!receipt) return null
 
-  // Ensure items is defined before mapping
   const items = details?.items || []
+
+  const handleDownloadSinglePdf = async () => {
+    if (!details) return
+    
+    try {
+      toast.loading('Gerando PDF do recebimento...')
+      const blob = await generateGoodsReceiptReport(
+        [{ ...receipt, items: items as any[], images }],
+        {
+          siteName: 'Estabelecimento',
+          generatedBy: 'Sistema ChefVoice',
+        }
+      )
+      downloadPdfReport(blob, `recebimento_${receipt.supplierName}_${new Date(receipt.createdAt).toISOString().split('T')[0]}.pdf`)
+      toast.dismiss()
+      toast.success('PDF gerado com sucesso!')
+    } catch (error) {
+      toast.dismiss()
+      toast.error('Erro ao gerar PDF')
+      console.error(error)
+    }
+  }
 
   return (
     <Dialog open={!!receipt} onOpenChange={onClose}>
@@ -268,7 +288,7 @@ function ReceiptDetailModal({ receipt, onClose }: ReceiptDetailModalProps) {
             <Package className="h-6 w-6 text-theme-primary" />
             Detalhes do Recebimento: {receipt.supplierName}
           </DialogTitle>
-          <div className="text-sm text-theme-muted flex items-center gap-4">
+          <div className="text-sm text-theme-muted flex items-center gap-4 flex-wrap">
             <span className="flex items-center gap-1">
               <Calendar className="h-4 w-4" />
               {new Date(receipt.receivedAt).toLocaleString('pt-BR', { dateStyle: 'full', timeStyle: 'short' })}
@@ -307,27 +327,27 @@ function ReceiptDetailModal({ receipt, onClose }: ReceiptDetailModalProps) {
             <div className="lg:col-span-2">
               <h3 className="text-xl font-semibold mb-3 text-theme-primary">Itens Recebidos</h3>
               <div className="space-y-4">
-                {isLoadingCorrectDetails ? (
+                {isLoadingDetails ? (
                   <p className="text-theme-muted">Carregando detalhes dos itens...</p>
                 ) : items.length === 0 ? (
                   <p className="text-theme-muted italic">Nenhum item registrado para esta entrega.</p>
                 ) : (
                   items.map((item, index) => (
-                    <Card key={item.id || index} className="p-4 flex justify-between items-center">
+                    <Card key={(item as any).id || index} className="p-4 flex justify-between items-center">
                       <div>
-                        <p className="font-medium text-theme-primary">{item.item_name}</p>
+                        <p className="font-medium text-theme-primary">{(item as any).item_name}</p>
                         <p className="text-sm text-theme-muted">
-                          {item.quantity} {item.unit} | Temp: {item.temperature?.toFixed(1) ?? '--'}°C
+                          {(item as any).quantity} {(item as any).unit} | Temp: {(item as any).temperature?.toFixed(1) ?? '--'}°C
                         </p>
                         <Badge className={cn(
                             'mt-1 w-fit',
-                            item.temperature_compliant ? STATUS_MAP.completed.color : STATUS_MAP.flagged.color
+                            (item as any).temperature_compliant ? STATUS_MAP.completed.color : STATUS_MAP.flagged.color
                         )}>
-                            {item.temperature_compliant ? 'Temp. OK' : 'Temp. Problema'}
+                            {(item as any).temperature_compliant ? 'Temp. OK' : 'Temp. Problema'}
                         </Badge>
                       </div>
                       <div className="text-sm text-right">
-                        <Badge variant="secondary">{item.category}</Badge>
+                        <Badge variant="secondary">{(item as any).category}</Badge>
                       </div>
                     </Card>
                   ))
@@ -347,9 +367,9 @@ function ReceiptDetailModal({ receipt, onClose }: ReceiptDetailModalProps) {
           </div>
         </ScrollArea>
         <div className="p-4 border-t border-theme-border flex justify-between">
-          <Button variant="outline" className="flex items-center gap-2" onClick={() => toast('Funcionalidade de Relatório em desenvolvimento.')}>
+          <Button variant="outline" className="flex items-center gap-2" onClick={handleDownloadSinglePdf}>
             <Download className="h-4 w-4" />
-            Gerar Relatório PDF
+            Baixar PDF
           </Button>
           <Button onClick={onClose}>
             Fechar Detalhes
@@ -360,17 +380,201 @@ function ReceiptDetailModal({ receipt, onClose }: ReceiptDetailModalProps) {
   )
 }
 
+// --- PDF Report Dialog ---
 
-export function ReceiptHistoryScreen() {
+interface ReportDialogProps {
+  isOpen: boolean
+  onClose: () => void
+  receipts: GoodsReceipt[]
+  filters: FilterState
+}
+
+function ReportDialog({ isOpen, onClose, receipts, filters }: ReportDialogProps) {
+  const { currentSite } = useAppStore()
+  const [isGenerating, setIsGenerating] = useState(false)
+  const [reportType, setReportType] = useState<'detailed' | 'summary'>('detailed')
+
+  const handleGenerateReport = async () => {
+    if (receipts.length === 0) {
+      toast.error('Nenhum recebimento para gerar relatório')
+      return
+    }
+
+    setIsGenerating(true)
+    toast.loading('Gerando relatório PDF...')
+
+    try {
+      // Fetch full details for all receipts if generating detailed report
+      let receiptsWithDetails = receipts
+      
+      if (reportType === 'detailed') {
+        const detailsPromises = receipts.map(r => getGoodsReceiptWithDetails(r.id))
+        const details = await Promise.all(detailsPromises)
+        receiptsWithDetails = details
+          .filter((d): d is NonNullable<typeof d> => d !== null)
+          .map(d => ({
+            ...d.receipt,
+            items: d.items as any[],
+            images: d.images,
+          }))
+      }
+
+      const options = {
+        siteName: currentSite?.name || 'Estabelecimento',
+        siteAddress: currentSite?.address,
+        generatedBy: 'ChefVoice Kitchen Compliance',
+        filters: {
+          status: filters.status !== 'all' ? filters.status : undefined,
+          search: filters.search || undefined,
+          startDate: filters.startDate || undefined,
+          endDate: filters.endDate || undefined,
+        },
+      }
+
+      let blob: Blob
+      if (reportType === 'summary') {
+        blob = generateSummaryReport(receiptsWithDetails as any, options)
+      } else {
+        blob = await generateGoodsReceiptReport(receiptsWithDetails as any, options)
+      }
+
+      const filename = `relatorio_recebimentos_${new Date().toISOString().split('T')[0]}.pdf`
+      downloadPdfReport(blob, filename)
+
+      toast.dismiss()
+      toast.success('Relatório gerado com sucesso!')
+      onClose()
+    } catch (error) {
+      toast.dismiss()
+      toast.error('Erro ao gerar relatório')
+      console.error(error)
+    } finally {
+      setIsGenerating(false)
+    }
+  }
+
+  return (
+    <Dialog open={isOpen} onOpenChange={onClose}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <FileText className="h-5 w-5" />
+            Gerar Relatório PDF
+          </DialogTitle>
+        </DialogHeader>
+        
+        <div className="space-y-6 py-4">
+          {/* Report Type Selection */}
+          <div className="space-y-3">
+            <label className="text-sm font-medium text-theme-primary">Tipo de Relatório</label>
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                onClick={() => setReportType('detailed')}
+                className={cn(
+                  'p-4 rounded-lg border-2 text-left transition-all',
+                  reportType === 'detailed'
+                    ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-900/20'
+                    : 'border-zinc-200 dark:border-zinc-700 hover:border-zinc-300'
+                )}
+              >
+                <FileText className="h-6 w-6 mb-2 text-emerald-600" />
+                <p className="font-medium text-sm">Detalhado</p>
+                <p className="text-xs text-theme-muted mt-1">
+                  Todos os detalhes, itens e imagens de cada recebimento
+                </p>
+              </button>
+              
+              <button
+                onClick={() => setReportType('summary')}
+                className={cn(
+                  'p-4 rounded-lg border-2 text-left transition-all',
+                  reportType === 'summary'
+                    ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-900/20'
+                    : 'border-zinc-200 dark:border-zinc-700 hover:border-zinc-300'
+                )}
+              >
+                <BarChart3 className="h-6 w-6 mb-2 text-emerald-600" />
+                <p className="font-medium text-sm">Resumido</p>
+                <p className="text-xs text-theme-muted mt-1">
+                  Visão geral em uma página com estatísticas
+                </p>
+              </button>
+            </div>
+          </div>
+
+          {/* Receipt Count Info */}
+          <div className="p-4 bg-theme-secondary rounded-lg">
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-theme-muted">Recebimentos incluídos:</span>
+              <span className="font-semibold text-theme-primary">{receipts.length}</span>
+            </div>
+            {filters.status !== 'all' && (
+              <div className="flex items-center justify-between mt-2">
+                <span className="text-sm text-theme-muted">Status filtrado:</span>
+                <span className="font-medium text-theme-primary">
+                  {STATUS_MAP[filters.status as ReceiptStatus]?.label || filters.status}
+                </span>
+              </div>
+            )}
+            {filters.search && (
+              <div className="flex items-center justify-between mt-2">
+                <span className="text-sm text-theme-muted">Busca:</span>
+                <span className="font-medium text-theme-primary">"{filters.search}"</span>
+              </div>
+            )}
+          </div>
+
+          {/* Info Note */}
+          <div className="flex items-start gap-2 text-sm text-theme-muted">
+            <ShieldCheck className="h-4 w-4 mt-0.5 flex-shrink-0" />
+            <p>
+              O relatório inclui todos os dados auditáveis e pode ser usado para conformidade HACCP.
+              As imagens são referenciadas no relatório detalhado.
+            </p>
+          </div>
+        </div>
+
+        <div className="flex justify-end gap-3">
+          <Button variant="outline" onClick={onClose} disabled={isGenerating}>
+            Cancelar
+          </Button>
+          <Button onClick={handleGenerateReport} disabled={isGenerating || receipts.length === 0}>
+            {isGenerating ? (
+              <>
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                Gerando...
+              </>
+            ) : (
+              <>
+                <Download className="h-4 w-4 mr-2" />
+                Gerar PDF
+              </>
+            )}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+// --- Main Screen ---
+
+interface ReceiptHistoryScreenProps {
+  onBack?: () => void
+  onNavigate?: (screen: string) => void
+}
+
+export function ReceiptHistoryScreen({ onBack, onNavigate }: ReceiptHistoryScreenProps) {
   const { currentSite } = useAppStore()
   const [filters, setFilters] = useState<FilterState>(DEFAULT_FILTERS)
   const [page, setPage] = useState(0)
   const [selectedReceipt, setSelectedReceipt] = useState<GoodsReceipt | null>(null)
+  const [isReportDialogOpen, setIsReportDialogOpen] = useState(false)
   const limit = 10
 
   const handleFilterChange = (key: keyof FilterState, value: string) => {
     setFilters(prev => ({ ...prev, [key]: value }))
-    setPage(0) // Reset page on filter change
+    setPage(0)
   }
 
   const { data, isLoading, isFetching } = useQuery({
@@ -381,7 +585,6 @@ export function ReceiptHistoryScreen() {
         limit: limit,
         offset: page * limit,
         status: filters.status === 'all' ? undefined : (filters.status as ReceiptStatus),
-        // Filter by date is not implemented in the service yet, but the query allows it. We skip it for now.
       })
     },
     enabled: !!currentSite?.id,
@@ -391,20 +594,17 @@ export function ReceiptHistoryScreen() {
   const totalCount = data?.total || 0
   const totalPages = Math.ceil(totalCount / limit)
 
-  // Simple client-side search filtering (only applies to what's loaded on the current page)
   const filteredReceipts = useMemo(() => {
     if (!filters.search) return receipts
     
     const searchLower = filters.search.toLowerCase()
     
-    // Search by supplier name, invoice number, or received by name
     return receipts.filter(receipt => 
       receipt.supplierName.toLowerCase().includes(searchLower) ||
       receipt.invoiceNumber?.toLowerCase().includes(searchLower) ||
       receipt.receivedByName.toLowerCase().includes(searchLower)
     )
   }, [receipts, filters.search])
-
 
   const openModal = (receipt: GoodsReceipt) => {
     setSelectedReceipt(receipt)
@@ -414,16 +614,33 @@ export function ReceiptHistoryScreen() {
     setSelectedReceipt(null)
   }
 
+  const handleNewReceipt = () => {
+    onNavigate?.('goods_receipt')
+  }
+
   return (
-    <MainContent>
-       <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6">
-        <h1 className="text-3xl font-bold text-theme-primary flex items-center gap-3">
-          <ListFilter className="w-7 h-7" />
-          Histórico de Recebimentos
-        </h1>
-        <Link to="/app/delivery/new">
-          <Button>Novo Recebimento</Button>
-        </Link>
+    <div className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto">
+      <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
+        <div className="flex items-center gap-3">
+          {onBack && (
+            <Button variant="ghost" size="sm" onClick={onBack} className="p-2">
+              <ArrowLeft className="h-5 w-5" />
+            </Button>
+          )}
+          <h1 className="text-3xl font-bold text-theme-primary flex items-center gap-3">
+            <ListFilter className="w-7 h-7" />
+            Histórico de Recebimentos
+          </h1>
+        </div>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={() => setIsReportDialogOpen(true)} className="flex items-center gap-2">
+            <FileText className="h-4 w-4" />
+            Relatório PDF
+          </Button>
+          <Button onClick={handleNewReceipt}>
+            Novo Recebimento
+          </Button>
+        </div>
       </header>
 
       <div className="mb-6">
@@ -433,20 +650,20 @@ export function ReceiptHistoryScreen() {
             Filtros
           </h2>
 
-          <div className="flex-1 min-w-[200px]">
+          <div className="flex-1 min-w-[200px] relative">
             <Input 
               placeholder="Buscar Fornecedor, NF, ou Recebedor..."
               value={filters.search}
               onChange={(e) => handleFilterChange('search', e.target.value)}
-              className="pl-8"
+              className="pl-10"
             />
-             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-theme-muted" />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-theme-muted" />
           </div>
 
-          <div className="w-[150px]">
+          <div className="w-[180px]">
             <Select 
               value={filters.status} 
-              onValueChange={(value) => handleFilterChange('status', value)}
+              onValueChange={(value: string) => handleFilterChange('status', value)}
             >
               <SelectTrigger>
                 <SelectValue placeholder="Status" />
@@ -474,9 +691,16 @@ export function ReceiptHistoryScreen() {
 
       <div className="space-y-4">
         {isLoading || isFetching ? (
-          <p className="text-theme-muted">Carregando histórico de recebimentos...</p>
+          <div className="flex items-center justify-center py-12">
+            <Loader2 className="h-8 w-8 animate-spin text-emerald-500" />
+            <span className="ml-3 text-theme-muted">Carregando histórico...</span>
+          </div>
         ) : filteredReceipts.length === 0 ? (
-          <p className="text-theme-muted italic">Nenhum recebimento encontrado. Comece a registrar novas entregas!</p>
+          <div className="text-center py-12">
+            <Package className="h-12 w-12 text-theme-muted mx-auto mb-4" />
+            <p className="text-theme-muted">Nenhum recebimento encontrado.</p>
+            <p className="text-sm text-theme-muted mt-1">Comece a registrar novas entregas!</p>
+          </div>
         ) : (
           filteredReceipts.map(receipt => (
             <ReceiptCard key={receipt.id} receipt={receipt} onClick={openModal} />
@@ -485,45 +709,43 @@ export function ReceiptHistoryScreen() {
       </div>
 
       {/* Pagination */}
-      <div className="flex justify-between items-center mt-6">
-        <p className="text-sm text-theme-muted">
-          Mostrando {filteredReceipts.length} de {totalCount} registros.
-        </p>
-        <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setPage(prev => Math.max(0, prev - 1))}
-            disabled={page === 0 || isLoading || isFetching}
-          >
-            Anterior
-          </Button>
-          <span className="text-sm font-medium text-theme-primary">
-            Página {page + 1} de {totalPages || 1}
-          </span>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setPage(prev => prev + 1)}
-            disabled={page >= totalPages - 1 || isLoading || isFetching || totalCount === 0}
-          >
-            Próxima
-          </Button>
+      {filteredReceipts.length > 0 && (
+        <div className="flex justify-between items-center mt-6">
+          <p className="text-sm text-theme-muted">
+            Mostrando {filteredReceipts.length} de {totalCount} registros.
+          </p>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setPage(prev => Math.max(0, prev - 1))}
+              disabled={page === 0 || isLoading || isFetching}
+            >
+              Anterior
+            </Button>
+            <span className="text-sm font-medium text-theme-primary">
+              Página {page + 1} de {totalPages || 1}
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setPage(prev => prev + 1)}
+              disabled={page >= totalPages - 1 || isLoading || isFetching || totalCount === 0}
+            >
+              Próxima
+            </Button>
+          </div>
         </div>
-      </div>
+      )}
 
       <ReceiptDetailModal receipt={selectedReceipt} onClose={closeModal} />
       
-    </MainContent>
-  )
-}
-
-// Dummy MainContent wrapper for compilation
-// This component should be refactored to use the actual MainLayout
-function MainContent({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto">
-      {children}
+      <ReportDialog 
+        isOpen={isReportDialogOpen} 
+        onClose={() => setIsReportDialogOpen(false)}
+        receipts={filteredReceipts}
+        filters={filters}
+      />
     </div>
   )
 }

@@ -275,11 +275,15 @@ export function useVoiceCloseFlow({
     [state.step, onStopListening]
   )
 
+  // Determine if current step expects a quick response (staff code, temperature)
+  const isQuickResponseStep = state.step === 'awaiting_staff' || state.step === 'awaiting_temperature'
+
   return {
     step: state.step,
     sessionId: state.sessionId,
     staffId: state.staffId,
     temperature: state.temperature,
+    isQuickResponseStep,
     startFlow,
     handleTranscript,
     checkInterimTranscript,

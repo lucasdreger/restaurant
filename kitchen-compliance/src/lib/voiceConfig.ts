@@ -11,7 +11,8 @@ export const VOICE_TIMING = {
   IMMEDIATE_COMMAND_WINDOW: 200,             // Reduced: Window for command spoken together with wake word
   
   // Command Listening
-  COMMAND_SILENCE_THRESHOLD: 800,            // Reduced: Silence before processing (ms)
+  COMMAND_SILENCE_THRESHOLD: 1200,           // Increased: More time after "ok luma" to think about the command
+  COMMAND_SILENCE_THRESHOLD_QUICK: 500,      // Fast: For staff code and temperature (quick answers)
   COMMAND_MAX_DURATION: 10000,               // Max command recording duration
   COMMAND_MIN_AUDIO_SIZE: 1000,              // Min bytes for audio processing
   

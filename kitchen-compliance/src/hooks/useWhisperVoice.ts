@@ -9,10 +9,11 @@ interface UseWhisperVoiceOptions {
   onTranscript?: (transcript: string) => void
   onError?: (error: string) => void
   disabled?: boolean // Don't process commands when disabled (for conversation mode)
+  quickResponseMode?: boolean // When true, use shorter silence timeout
 }
 
 export function useWhisperVoice(options: UseWhisperVoiceOptions = {}) {
-  const { onCommand, onTranscript, onError, disabled = false } = options
+  const { onCommand, onTranscript, onError, disabled = false, quickResponseMode = false } = options
   const [isConfigured, setIsConfigured] = useState(false)
   const [transcript, setTranscript] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -81,13 +82,14 @@ export function useWhisperVoice(options: UseWhisperVoiceOptions = {}) {
       whisperService.setOnSilenceDetected(() => {
         console.log('[WhisperHook] Silence auto-stop triggered')
         stopListening()
-      })
+      }, quickResponseMode)
 
-      // Auto-stop limit after 10 seconds for safety
+      // Auto-stop limit after 10 seconds for safety (shorter for quick responses)
+      const autoStopDelay = quickResponseMode ? 5000 : 10000
       autoStopTimeoutRef.current = setTimeout(() => {
-        console.log('[WhisperHook] Auto-stopping recording after 10s')
+        console.log(`[WhisperHook] Auto-stopping recording after ${autoStopDelay/1000}s`)
         stopListening()
-      }, 10000)
+      }, autoStopDelay)
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to start recording'
       console.error('[WhisperHook] Start error:', msg)
@@ -96,7 +98,7 @@ export function useWhisperVoice(options: UseWhisperVoiceOptions = {}) {
       isRecordingRef.current = false
       setIsListening(false)
     }
-  }, [isConfigured, isListening, setIsListening, onError, settings.voiceProvider])
+  }, [isConfigured, isListening, setIsListening, onError, settings.voiceProvider, quickResponseMode])
 
   // Stop recording and transcribe
   const stopListening = useCallback(async () => {

@@ -174,8 +174,121 @@ export const closeCoolingFlow: ConversationFlow = {
   },
 };
 
+// Fridge temperature logging flow
+export const logFridgeTempFlow: ConversationFlow = {
+  id: 'log_fridge_temp',
+  name: 'Log Fridge Temperature',
+  triggerCommands: ['log_fridge_temp'],
+  
+  steps: [
+    {
+      id: 'fridge_selection',
+      prompt: () => 'Which fridge? Say the fridge name or number.',
+      expectation: 'text',
+      timeoutMs: 12000,
+      
+      validation: (input) => {
+        const fridgeName = input.trim();
+        if (!fridgeName || fridgeName.length < 1) {
+          return { valid: false, message: "Please say a fridge name or number." };
+        }
+        return { valid: true, data: fridgeName };
+      },
+      
+      onSuccess: (_input, ctx) => ({
+        ...ctx,
+        fridgeName: ctx.validationData,
+      }),
+      
+      onFailure: () => "I didn't understand. Please say the fridge name.",
+    },
+    {
+      id: 'staff_code',
+      prompt: () => 'What is your staff code?',
+      expectation: 'number',
+      timeoutMs: 10000,
+      
+      validation: (input, ctx) => {
+        const staffCode = parseSpokenNumber(input);
+        if (staffCode === null) return { valid: false, message: "I didn't catch a number." };
+        
+        const staff = ctx.staffMembers.find(
+          s => s.staff_code === staffCode.toString() ||
+               parseInt(s.staff_code || '', 10) === staffCode
+        );
+        
+        if (!staff) return { valid: false, message: `No staff with code ${staffCode}.` };
+        
+        return { valid: true, data: staff };
+      },
+      
+      onSuccess: (_input, ctx) => ({
+        ...ctx,
+        staffId: ctx.validationData.id,
+        staffName: ctx.validationData.name,
+      }),
+      
+      onFailure: () => "Please say your staff number.",
+    },
+    {
+      id: 'temperature',
+      prompt: (ctx) => `Got it, ${ctx.staffName}. What's the temperature in Celsius?`,
+      expectation: 'number',
+      timeoutMs: 10000,
+      
+      validation: (input) => {
+        const temp = parseSpokenNumber(input);
+        if (temp === null) return { valid: false, message: "Please say a number." };
+        
+        if (temp < -30 || temp > 60) {
+          return { valid: false, message: `${temp} degrees? That doesn't seem right for a fridge.` };
+        }
+        
+        return { valid: true, data: temp };
+      },
+      
+      onSuccess: (_input, ctx) => ({
+        ...ctx,
+        temperature: ctx.validationData,
+      }),
+      
+      onFailure: () => "Say the temperature in degrees Celsius.",
+    },
+    {
+      id: 'confirmation',
+      prompt: (ctx) => {
+        const temp = ctx.temperature ?? 0;
+        const compliance = temp >= 0 && temp <= 5 ? '✓ Compliant' : '⚠ Out of range (0-5°C)';
+        return `Log ${temp}°C for ${ctx.fridgeName} by ${ctx.staffName}. ${compliance}. Say confirm to save.`;
+      },
+      expectation: 'confirmation',
+      
+      validation: (input) => {
+        const lower = input.toLowerCase();
+        const confirmWords = ['confirm', 'yes', 'save', 'ok', 'okay', 'correct', 'right', 'yep', 'yeah'];
+        const cancelWords = ['cancel', 'no', 'stop', 'wrong', 'nope', 'back'];
+        
+        if (confirmWords.some(w => lower.includes(w))) return { valid: true, data: 'confirmed' };
+        if (cancelWords.some(w => lower.includes(w))) return { valid: true, data: 'cancelled' };
+        
+        return { valid: false, message: "Say 'confirm' to save or 'cancel' to discard." };
+      },
+      
+      onSuccess: (_input, ctx) => ({
+        ...ctx,
+        confirmed: ctx.validationData === 'confirmed',
+      }),
+    },
+  ],
+  
+  onComplete: async (ctx) => {
+    console.log('[Flow] log_fridge_temp completed', ctx);
+  },
+};
+
 export const conversationFlows: ConversationFlow[] = [
   closeCoolingFlow,
+  logFridgeTempFlow,
 ];
 
 export function findFlowByCommand(commandType: string): ConversationFlow | undefined {

@@ -13,6 +13,7 @@ import { ReportsScreen } from '@/components/screens/ReportsScreen'
 import { VenuesScreen } from '@/components/screens/VenuesScreen'
 import { MenuEngineeringScreen } from '@/components/menu/MenuEngineeringScreen'
 import { GoodsReceiptScreen } from '@/components/receipt/GoodsReceiptScreen'
+import { ReceiptHistoryScreen } from '@/components/receipt/ReceiptHistoryScreen'
 
 // Lazy load only auth/onboarding screens (used less frequently)
 const LandingPage = lazy(() => import('@/components/landing/LandingPage').then(m => ({ default: m.LandingPage })))
@@ -33,7 +34,7 @@ const queryClient = new QueryClient({
   },
 })
 
-type Screen = 'home' | 'history' | 'settings' | 'compliance' | 'reports' | 'venues' | 'menu_engineering' | 'goods_receipt'
+type Screen = 'home' | 'history' | 'settings' | 'compliance' | 'reports' | 'venues' | 'menu_engineering' | 'goods_receipt' | 'receipt_history'
 
 // Fallback demo site (used when Supabase not available)
 const FALLBACK_DEMO_SITE: Site = {
@@ -533,6 +534,8 @@ function AppContent() {
         return <MenuEngineeringScreen onBack={() => setCurrentScreen('home')} />
       case 'goods_receipt':
         return <GoodsReceiptScreen onBack={() => setCurrentScreen('home')} onNavigate={handleNavigate} />
+      case 'receipt_history':
+        return <ReceiptHistoryScreen onBack={() => setCurrentScreen('home')} onNavigate={handleNavigate} />
       case 'venues':
         return <VenuesScreen onBack={() => setCurrentScreen('home')} />
       case 'home':

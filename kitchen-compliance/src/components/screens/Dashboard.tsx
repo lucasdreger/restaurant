@@ -145,6 +145,10 @@ export function Dashboard({ onNavigate, currentScreen = 'home' }: DashboardProps
             handleDiscardCooling(activeSessions[0].id)
           }
           break
+        case 'log_fridge_temp':
+          setIsFridgeTempModalOpen(true)
+          speak('Opening fridge temperature logger')
+          break
       }
 
       // Resume wake word listening after a short delay (only if not starting a flow)
@@ -156,7 +160,7 @@ export function Dashboard({ onNavigate, currentScreen = 'home' }: DashboardProps
         }, 1000)
       }
     },
-    [activeSessions, handleStartCooling, handleDiscardCooling, settings.wakeWordEnabled, voiceCloseFlow]
+    [activeSessions, handleStartCooling, handleDiscardCooling, settings.wakeWordEnabled, voiceCloseFlow, speak]
   )
 
   const handleVoiceEnd = useCallback(() => {
@@ -315,6 +319,7 @@ export function Dashboard({ onNavigate, currentScreen = 'home' }: DashboardProps
                   wakeWordTriggered={wakeWordTriggered}
                   wakeWordLabel={primaryWakeWordLabel}
                   conversationMode={voiceCloseFlow.step !== 'idle'}
+                  quickResponseMode={voiceCloseFlow.isQuickResponseStep}
                 />
                 <div className="text-left">
                   <span className="font-bold text-theme-primary text-lg">Voice Commands</span>

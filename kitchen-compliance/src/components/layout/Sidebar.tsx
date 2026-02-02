@@ -41,7 +41,8 @@ export function Sidebar({ currentScreen, onNavigate, siteName = 'Kitchen Ops' }:
 
   const navItems = [
     { id: 'home', label: 'Command Center', icon: Home, description: 'Live monitoring' },
-    { id: 'goods_receipt', label: 'Goods Receipt', icon: Package, description: 'Delivery intake & OCR', badge: 'NEW' },
+    { id: 'goods_receipt', label: 'Goods Receipt', icon: Package, description: 'New delivery intake', badge: 'NEW' },
+    { id: 'receipt_history', label: 'Receipt History', icon: ClipboardCheck, description: 'View deliveries & reports' },
     { id: 'menu_engineering', label: 'Menu Engineering', icon: ChefHat, description: 'Cost & Margin Control', badge: 'PRO' },
     { id: 'history', label: 'Cooling Logs', icon: History, description: 'Session history' },
     { id: 'compliance', label: 'FSAI Compliance', icon: ClipboardCheck, description: 'Audit reports' },

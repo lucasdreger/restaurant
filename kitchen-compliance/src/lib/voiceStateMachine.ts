@@ -1,6 +1,6 @@
 // src/lib/voiceStateMachine.ts
 
-import { ConversationFlow, FlowContext } from './conversationFlows';
+import type { ConversationFlow, FlowContext } from './conversationFlows';
 
 export type VoiceState =
   | 'idle'

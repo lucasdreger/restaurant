@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import { Plus, Snowflake, History, FileText, AlertTriangle, Mic, Thermometer } from 'lucide-react'
+import { Plus, Snowflake, History, AlertTriangle, Mic, Thermometer } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { CoolingCard } from '@/components/cooling/CoolingCard'
 import { StartCoolingModal } from '@/components/cooling/StartCoolingModal'
@@ -17,13 +17,11 @@ import { parseVoiceCommand } from '@/lib/voiceCommands'
 
 interface KioskHomeProps {
   onNavigateToHistory?: () => void
-  onNavigateToReports?: () => void
   onNavigateToSettings?: () => void
 }
 
 export function KioskHome({
   onNavigateToHistory,
-  onNavigateToReports,
   onNavigateToSettings,
 }: KioskHomeProps) {
   const [isStartModalOpen, setIsStartModalOpen] = useState(false)

@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { VOICE_TIMING } from '@/lib/voiceConfig'
 
 /**
  * Wake Word Detection Hook
@@ -49,7 +48,8 @@ function extractCommandAfterWakeWord(transcript: string, wakeWords: string[]): s
     const index = lower.indexOf(wakeLower)
     if (index !== -1) {
       const afterWake = transcript.slice(index + wake.length).trim()
-      return afterWake.length > 2 ? afterWake : null
+      // Allow single characters (for numbers like "2" or "#2")
+      return afterWake.length >= 1 ? afterWake : null
     }
   }
   return null
@@ -208,8 +208,9 @@ export function useWakeWord(options: UseWakeWordOptions) {
           if (isFinal) {
             console.log('[WakeWord] Final match found:', transcript)
 
-            if (immediateCommand && immediateCommand.length > 3) {
-              // User said command in same breath as wake word (e.g., "Hey Luma done")
+            if (immediateCommand && immediateCommand.length >= 1) {
+              // User said command in same breath as wake word (e.g., "Hey Luma done" or "Hey Luma finish cooling 2")
+              // Reduced from > 3 to >= 1 to allow single numbers like "2" or "#2"
               console.log('[WakeWord] Immediate command detected:', immediateCommand)
               pendingCommandRef.current = immediateCommand
               isAbortingRef.current = true

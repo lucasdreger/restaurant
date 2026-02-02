@@ -24,11 +24,12 @@ interface VoiceButtonProps {
   wakeWordTriggered?: boolean
   wakeWordLabel?: string // e.g. "Hey Luma" for display
   conversationMode?: boolean // Force browser speech for conversation flows
+  quickResponseMode?: boolean // When true, use shorter silence timeout (for staff code, temperature)
 }
 
 export const VoiceButton = forwardRef<VoiceButtonHandle, VoiceButtonProps>(
   function VoiceButton(
-    { onCommand, onTranscript, onInterimTranscript, onEnd, className, size = 'lg', wakeWordActive = false, wakeWordTriggered = false, wakeWordLabel = 'Hey Luma', conversationMode = false },
+    { onCommand, onTranscript, onInterimTranscript, onEnd, className, size = 'lg', wakeWordActive = false, wakeWordTriggered = false, wakeWordLabel = 'Hey Luma', conversationMode = false, quickResponseMode = false },
     ref
   ) {
     const { speak } = useTextToSpeech()
@@ -127,6 +128,7 @@ export const VoiceButton = forwardRef<VoiceButtonHandle, VoiceButtonProps>(
       disabled: !useWhisper, // Use Whisper when API key is available
       onCommand: conversationMode ? undefined : handleCommand, // Parse commands only in command mode
       onTranscript: onTranscript, // Always transcribe
+      quickResponseMode: quickResponseMode, // Use shorter silence timeout for staff code/temperature
       onError: (err) => {
         console.error('[WhisperVoice] Error:', err)
         handleEnd()

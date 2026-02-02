@@ -60,9 +60,11 @@ export class AudioRecorder {
 
   private silenceTimer: NodeJS.Timeout | null = null
   private onSilenceDetected: (() => void) | null = null
+  private quickResponseMode: boolean = false
 
-  setOnSilenceDetected(callback: () => void) {
+  setOnSilenceDetected(callback: () => void, quickMode: boolean = false) {
     this.onSilenceDetected = callback
+    this.quickResponseMode = quickMode
   }
 
   private setupSilenceDetection() {
@@ -89,10 +91,11 @@ export class AudioRecorder {
       // Threshold for silence (very low amplitude)
       if (volume < 5) { // Adjusted for noise
         if (!this.silenceTimer) {
-          this.silenceTimer = setTimeout(() => {
+          const silenceDelay = this.quickResponseMode ? 400 : 700 // Quick: 400ms, Normal: 700ms
+      this.silenceTimer = setTimeout(() => {
             console.log('[Voice] Silence detected, auto-stopping...')
             this.onSilenceDetected?.()
-      }, 400) // Reduced: 0.4 seconds of silence for faster response
+      }, silenceDelay)
         }
       } else {
         if (this.silenceTimer) {
@@ -266,47 +269,6 @@ class OpenRouterAudioClient {
     return this.transcribeWithChatEndpoint(audioBlob, mimeType, modelToUse)
   }
 
-  // Method kept for internal routing but unused for now as we use Chat endpoint for all OpenRouter models
-  private async transcribeWithWhisperEndpoint(audioBlob: Blob): Promise<TranscriptionResult> {
-    const formData = new FormData()
-
-    // Convert blob to file with proper extension
-    // Whisper loves .webm or .wav
-    const audioFile = new File([audioBlob], `audio.webm`, { type: audioBlob.type })
-
-    formData.append('file', audioFile)
-    formData.append('model', this.model)
-    formData.append('language', this.language)
-    formData.append('response_format', 'json')
-
-    console.log('[OpenRouter] Sending audio to Whisper endpoint:', this.model)
-
-    try {
-      const response = await fetch('https://openrouter.ai/api/v1/audio/transcriptions', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${this.apiKey}`,
-        },
-        body: formData,
-      })
-
-      if (!response.ok) {
-        const error = await response.text()
-        console.error('[OpenRouter] Whisper API error:', response.status, error)
-        throw new Error(`Whisper transcription failed: ${response.status}`)
-      }
-
-      const result = await response.json()
-      console.log('[OpenRouter] Whisper result:', result)
-
-      return {
-        text: result.text || '',
-      }
-    } catch (error) {
-      console.error('[OpenRouter] Whisper error:', error)
-      throw error
-    }
-  }
 
   private async transcribeWithChatEndpoint(audioBlob: Blob, _mimeType: string, modelToUse?: string): Promise<TranscriptionResult> {
     const audioBase64 = await blobToBase64(audioBlob)
@@ -456,8 +418,8 @@ export class VoiceRecognitionService {
     return this.recorder.isRecording
   }
 
-  setOnSilenceDetected(callback: () => void): void {
-    this.recorder.setOnSilenceDetected(callback)
+  setOnSilenceDetected(callback: () => void, quickMode: boolean = false): void {
+    this.recorder.setOnSilenceDetected(callback, quickMode)
   }
 
   async startRecording(): Promise<void> {
