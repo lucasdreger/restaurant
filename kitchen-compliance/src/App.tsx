@@ -20,8 +20,8 @@ const LandingPage = lazy(() => import('@/components/landing/LandingPage').then(m
 const OnboardingQuestionnaire = lazy(() => import('@/components/onboarding/OnboardingQuestionnaire').then(m => ({ default: m.OnboardingQuestionnaire })))
 import { supabase, isSupabaseConfigured, DEMO_SITE_ID } from '@/lib/supabase'
 import { getStaffMembers, getSiteSettings } from '@/services/settingsService'
-import { fetchCoolingSessions } from '@/services/coolingService'
-import type { Site } from '@/types'
+import { fetchCoolingSessions, createCoolingSession } from '@/services/coolingService'
+import type { Site, CoolingSession } from '@/types'
 import type { User, Session } from '@supabase/supabase-js'
 
 // Create a client
@@ -312,9 +312,23 @@ function AppContent() {
 
       try {
         const sessions = await fetchCoolingSessions(currentSite.id)
-        setCoolingSessions(sessions)
+        // Only overwrite localStorage if we got valid data from DB
+        // This prevents empty DB results from wiping local sessions
+        if (sessions && sessions.length > 0) {
+          console.log(`❄️ Loaded ${sessions.length} cooling sessions from database`)
+          setCoolingSessions(sessions)
+        } else {
+          // Check if we have local sessions for this site
+          const { coolingSessions: localSessions } = useAppStore.getState()
+          const siteLocalSessions = localSessions.filter(s => s.site_id === currentSite.id)
+          if (siteLocalSessions.length > 0) {
+            console.log(`❄️ Using ${siteLocalSessions.length} local cooling sessions`)
+          } else {
+            console.log('❄️ No cooling sessions found in DB or localStorage')
+          }
+        }
       } catch (err) {
-        console.warn('Failed to fetch cooling sessions:', err)
+        console.warn('Failed to fetch cooling sessions, keeping local data:', err)
       }
     }
 
@@ -424,10 +438,9 @@ function AppContent() {
       await new Promise(resolve => setTimeout(resolve, 300))
 
       try {
-        const [settingsRecord, staffData, sessions] = await Promise.all([
+        const [settingsRecord, staffData] = await Promise.all([
           getSiteSettings(FALLBACK_DEMO_SITE.id),
-          getStaffMembers(FALLBACK_DEMO_SITE.id),
-          fetchCoolingSessions(FALLBACK_DEMO_SITE.id)
+          getStaffMembers(FALLBACK_DEMO_SITE.id)
         ])
 
         if (settingsRecord) {
@@ -464,43 +477,88 @@ function AppContent() {
           console.warn('⚠️ No demo staff found in database')
         }
 
-        if (sessions) {
-          console.log(`❄️ Loaded ${sessions.length} demo cooling sessions`)
-          // For demo purposes, modify timestamps to show a mix of statuses immediately
-          // This ensures users see both active (blue), warning (amber), and overdue (red) states
-          const now = new Date()
-          const modifiedSessions = sessions.map((session, index) => {
-            // Create a mix of statuses for demo visualization
-            // Index 0: overdue (started 2.5 hours ago)
-            // Index 1: warning (started 1.5 hours ago)
-            // Index 2+: active (started recently)
-            const modifiedSession = { ...session }
-            if (index === 0) {
-              // Overdue - started 150 minutes ago (2.5 hours)
-              const startedAt = new Date(now.getTime() - 150 * 60 * 1000)
-              modifiedSession.started_at = startedAt.toISOString()
-              modifiedSession.soft_due_at = new Date(startedAt.getTime() + 90 * 60 * 1000).toISOString()
-              modifiedSession.hard_due_at = new Date(startedAt.getTime() + 120 * 60 * 1000).toISOString()
-              modifiedSession.status = 'overdue'
-            } else if (index === 1) {
-              // Warning - started 100 minutes ago (1h 40m)
-              const startedAt = new Date(now.getTime() - 100 * 60 * 1000)
-              modifiedSession.started_at = startedAt.toISOString()
-              modifiedSession.soft_due_at = new Date(startedAt.getTime() + 90 * 60 * 1000).toISOString()
-              modifiedSession.hard_due_at = new Date(startedAt.getTime() + 120 * 60 * 1000).toISOString()
-              modifiedSession.status = 'warning'
-            } else if (index >= 2) {
-              // Active - started recently (within last 30 minutes)
-              const startedAt = new Date(now.getTime() - (10 + index * 5) * 60 * 1000)
-              modifiedSession.started_at = startedAt.toISOString()
-              modifiedSession.soft_due_at = new Date(startedAt.getTime() + 90 * 60 * 1000).toISOString()
-              modifiedSession.hard_due_at = new Date(startedAt.getTime() + 120 * 60 * 1000).toISOString()
-              modifiedSession.status = 'active'
+        // Delete old demo cooling sessions and create fresh ones
+        let demoSessions: CoolingSession[] = []
+        const now = new Date()
+        
+        // First, delete all existing cooling sessions for the demo site to ensure fresh timestamps
+        try {
+          const { data: existingSessions, error: fetchError } = await (supabase
+            .from('cooling_sessions') as any)
+            .select('id')
+            .eq('site_id', FALLBACK_DEMO_SITE.id)
+          
+          if (!fetchError && existingSessions && existingSessions.length > 0) {
+            console.log(`🗑️ Deleting ${existingSessions.length} old demo cooling sessions`)
+            const { error: deleteError } = await (supabase
+              .from('cooling_sessions') as any)
+              .delete()
+              .eq('site_id', FALLBACK_DEMO_SITE.id)
+            
+            if (deleteError) {
+              console.warn('Failed to delete old cooling sessions:', deleteError)
+            } else {
+              console.log('✅ Deleted old demo cooling sessions')
             }
-            return modifiedSession
-          })
-          setCoolingSessions(modifiedSessions)
+          }
+        } catch (err) {
+          console.warn('Could not delete old cooling sessions:', err)
         }
+
+        // Always create fresh demo sessions with current-relative timestamps
+        // 1. Overdue session (RED) - started 150 minutes ago (2.5 hours)
+        const overdueSession = createCoolingSession('Chicken Curry', 'soup', FALLBACK_DEMO_SITE.id, 'demo-user')
+        const overdueStartTime = new Date(now.getTime() - 150 * 60 * 1000)
+        overdueSession.started_at = overdueStartTime.toISOString()
+        overdueSession.soft_due_at = new Date(overdueStartTime.getTime() + 90 * 60 * 1000).toISOString()
+        overdueSession.hard_due_at = new Date(overdueStartTime.getTime() + 120 * 60 * 1000).toISOString()
+        overdueSession.status = 'overdue'
+        overdueSession.staff_name = 'Chef Maria'
+        demoSessions.push(overdueSession)
+
+        // 2. Warning session (AMBER) - started 100 minutes ago (1h 40m)
+        const warningSession = createCoolingSession('Beef Stew', 'soup', FALLBACK_DEMO_SITE.id, 'demo-user')
+        const warningStartTime = new Date(now.getTime() - 100 * 60 * 1000)
+        warningSession.started_at = warningStartTime.toISOString()
+        warningSession.soft_due_at = new Date(warningStartTime.getTime() + 90 * 60 * 1000).toISOString()
+        warningSession.hard_due_at = new Date(warningStartTime.getTime() + 120 * 60 * 1000).toISOString()
+        warningSession.status = 'warning'
+        warningSession.staff_name = 'Chef John'
+        demoSessions.push(warningSession)
+
+        // 3. Active session 1 (BLUE) - started 15 minutes ago
+        const activeSession1 = createCoolingSession('Tomato Sauce', 'sauce', FALLBACK_DEMO_SITE.id, 'demo-user')
+        const activeStartTime1 = new Date(now.getTime() - 15 * 60 * 1000)
+        activeSession1.started_at = activeStartTime1.toISOString()
+        activeSession1.soft_due_at = new Date(activeStartTime1.getTime() + 90 * 60 * 1000).toISOString()
+        activeSession1.hard_due_at = new Date(activeStartTime1.getTime() + 120 * 60 * 1000).toISOString()
+        activeSession1.status = 'active'
+        activeSession1.staff_name = 'Chef Maria'
+        demoSessions.push(activeSession1)
+
+        // 4. Active session 2 (BLUE) - started 5 minutes ago
+        const activeSession2 = createCoolingSession('Bolognese', 'sauce', FALLBACK_DEMO_SITE.id, 'demo-user')
+        const activeStartTime2 = new Date(now.getTime() - 5 * 60 * 1000)
+        activeSession2.started_at = activeStartTime2.toISOString()
+        activeSession2.soft_due_at = new Date(activeStartTime2.getTime() + 90 * 60 * 1000).toISOString()
+        activeSession2.hard_due_at = new Date(activeStartTime2.getTime() + 120 * 60 * 1000).toISOString()
+        activeSession2.status = 'active'
+        activeSession2.staff_name = 'Chef John'
+        demoSessions.push(activeSession2)
+
+        console.log(`❄️ Created ${demoSessions.length} demo cooling sessions (overdue, warning, active)`)
+        
+        // Sync demo sessions to database so they persist
+        const { syncSessionToSupabase } = await import('@/services/coolingService')
+        for (const session of demoSessions) {
+          try {
+            await syncSessionToSupabase(session)
+          } catch (err) {
+            console.warn('Failed to sync demo session:', err)
+          }
+        }
+        
+        setCoolingSessions(demoSessions)
       } catch (err) {
         console.warn('Failed to load demo site data:', err)
       }

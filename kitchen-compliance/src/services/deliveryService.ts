@@ -150,7 +150,7 @@ export async function createGoodsReceipt(
       overall_temperature: input.overallTemperature || null,
       temperature_compliant: input.temperatureCompliant ?? true,
       ocr_raw_text: input.ocrRawText || null,
-      ocr_confidence: input.ocrConfidence || null,
+      ocr_confidence: input.ocrConfidence ? input.ocrConfidence / 100 : null,
       notes: input.notes || null,
       status: input.status || 'completed',
     }

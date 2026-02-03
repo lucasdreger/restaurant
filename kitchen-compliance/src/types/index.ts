@@ -160,7 +160,7 @@ export type VoiceCommand =
   | { type: 'start_cooling'; item?: string }
   | { type: 'stop_cooling'; sessionId?: string; item?: string }
   | { type: 'discard'; sessionId?: string }
-  | { type: 'log_fridge_temp' }
+  | { type: 'log_fridge_temp'; fridgeNumber?: string }
   | { type: 'unknown' }
 
 // Export report data

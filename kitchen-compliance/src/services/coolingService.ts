@@ -225,7 +225,6 @@ export function useCoolingWorkflow() {
     addToOfflineQueue,
     currentSite,
     isOnline,
-    isDemo,
   } = useAppStore()
 
   // Start a new cooling session
@@ -253,18 +252,15 @@ export function useCoolingWorkflow() {
       item_category: itemCategory,
     })
 
-    // Sync to Supabase if online (skip or squash errors if in demo mode or auth is missing)
-    if (isOnline && !isDemo) {
+    // Sync to Supabase if online (sync in demo mode too since demo site is in database)
+    if (isOnline) {
       const synced = await syncSessionToSupabase(session)
       if (synced) {
         updateCoolingSession(session.id, { synced: true })
         await syncEventToSupabase(event)
       }
-    } else if (isDemo) {
-      // In demo mode, we just mark as synced locally to avoid error UI
-      updateCoolingSession(session.id, { synced: true })
     } else {
-      // Queue for later sync
+      // Queue for later sync when offline
       addToOfflineQueue(event)
     }
 
@@ -305,15 +301,13 @@ export function useCoolingWorkflow() {
       temperature_compliant: closeData?.temperature !== undefined ? closeData.temperature < 8 : undefined,
     })
 
-    // Sync to Supabase if online
-    if (isOnline && !isDemo) {
+    // Sync to Supabase if online (sync in demo mode too)
+    if (isOnline) {
       const synced = await syncSessionToSupabase({ ...session, ...updates })
       if (synced) {
         updateCoolingSession(sessionId, { synced: true })
         await syncEventToSupabase(event)
       }
-    } else if (isDemo) {
-      updateCoolingSession(sessionId, { synced: true })
     } else {
       addToOfflineQueue(event)
     }
@@ -346,15 +340,13 @@ export function useCoolingWorkflow() {
       ),
     })
 
-    // Sync to Supabase if online
-    if (isOnline && !isDemo) {
+    // Sync to Supabase if online (sync in demo mode too)
+    if (isOnline) {
       const synced = await syncSessionToSupabase({ ...session, ...updates })
       if (synced) {
         updateCoolingSession(sessionId, { synced: true })
         await syncEventToSupabase(event)
       }
-    } else if (isDemo) {
-      updateCoolingSession(sessionId, { synced: true })
     } else {
       addToOfflineQueue(event)
     }

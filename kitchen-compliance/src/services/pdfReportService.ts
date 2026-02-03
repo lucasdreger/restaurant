@@ -37,24 +37,106 @@ interface GenerateReportOptions {
   includeImages?: boolean
 }
 
-// Status translations for Portuguese
+/**
+ * Fetch image from URL and convert to base64
+ */
+async function imageToBase64(url: string): Promise<string | null> {
+  try {
+    const response = await fetch(url)
+    if (!response.ok) {
+      console.error(`Failed to fetch image: ${url}`, response.status)
+      return null
+    }
+    const blob = await response.blob()
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onloadend = () => {
+        const base64 = reader.result as string
+        // Remove data URL prefix if present
+        const base64Data = base64.split(',')[1] || base64
+        resolve(base64Data)
+      }
+      reader.onerror = reject
+      reader.readAsDataURL(blob)
+    })
+  } catch (error) {
+    console.error('Error converting image to base64:', error)
+    return null
+  }
+}
+
+/**
+ * Get image format from mime type or URL
+ */
+function getImageFormat(url: string): 'JPEG' | 'PNG' | 'WEBP' {
+  const lowerUrl = url.toLowerCase()
+  if (lowerUrl.includes('.png')) return 'PNG'
+  if (lowerUrl.includes('.webp')) return 'WEBP'
+  return 'JPEG' // default
+}
+
+/**
+ * Get image dimensions from base64 data
+ */
+function getImageDimensions(base64Data: string): Promise<{ width: number; height: number }> {
+  return new Promise((resolve) => {
+    const img = new Image()
+    img.onload = () => {
+      resolve({ width: img.width, height: img.height })
+    }
+    img.onerror = () => {
+      resolve({ width: 0, height: 0 })
+    }
+    img.src = `data:image/jpeg;base64,${base64Data}`
+  })
+}
+
+/**
+ * Calculate image dimensions preserving aspect ratio
+ */
+function calculateImageDimensions(
+  imgWidth: number,
+  imgHeight: number,
+  maxWidth: number,
+  maxHeight: number
+): { width: number; height: number } {
+  if (imgWidth === 0 || imgHeight === 0) {
+    return { width: maxWidth, height: maxHeight }
+  }
+
+  const aspectRatio = imgWidth / imgHeight
+
+  // Try fitting to max width first
+  let newWidth = maxWidth
+  let newHeight = maxWidth / aspectRatio
+
+  // If height exceeds max, scale down
+  if (newHeight > maxHeight) {
+    newHeight = maxHeight
+    newWidth = maxHeight * aspectRatio
+  }
+
+  return { width: newWidth, height: newHeight }
+}
+
+// Status translations for English
 const STATUS_LABELS: Record<string, string> = {
-  completed: 'Concluído',
-  draft: 'Rascunho',
-  flagged: 'Sinalizado',
-  voided: 'Anulado',
+  completed: 'Completed',
+  draft: 'Draft',
+  flagged: 'Flagged',
+  voided: 'Voided',
 }
 
 // Category translations
 const CATEGORY_LABELS: Record<string, string> = {
-  chilled: 'Resfriado',
-  frozen: 'Congelado',
-  ambient: 'Ambiente',
-  dry: 'Seco',
-  produce: 'Hortifruti',
-  meat: 'Carnes',
-  dairy: 'Laticínios',
-  seafood: 'Frutos do Mar',
+  chilled: 'Chilled',
+  frozen: 'Frozen',
+  ambient: 'Ambient',
+  dry: 'Dry',
+  produce: 'Produce',
+  meat: 'Meat',
+  dairy: 'Dairy',
+  seafood: 'Seafood',
 }
 
 /**
@@ -78,8 +160,8 @@ export async function generateGoodsReceiptReport(
   const addHeader = (pageNum: number, totalPages: number) => {
     doc.setFontSize(10)
     doc.setTextColor(100, 100, 100)
-    doc.text(`ChefVoice Kitchen Compliance - Relatório de Recebimentos`, margin, 10)
-    doc.text(`Página ${pageNum} de ${totalPages}`, pageWidth - margin - 30, 10)
+    doc.text(`ChefVoice Kitchen Compliance - Goods Receipt Report`, margin, 10)
+    doc.text(`Page ${pageNum} of ${totalPages}`, pageWidth - margin - 30, 10)
     doc.setDrawColor(200, 200, 200)
     doc.line(margin, 12, pageWidth - margin, 12)
   }
@@ -88,22 +170,22 @@ export async function generateGoodsReceiptReport(
   const addFooter = () => {
     doc.setFontSize(8)
     doc.setTextColor(150, 150, 150)
-    const footerText = `Relatório gerado em: ${new Date().toLocaleString('pt-BR')} por ${options.generatedBy}`
+    const footerText = `Report generated on: ${new Date().toLocaleString('en-IE')} by ${options.generatedBy}`
     doc.text(footerText, margin, pageHeight - 10)
-    doc.text('Documento para fins de auditoria HACCP', pageWidth - margin - 60, pageHeight - 10)
+    doc.text('Document for HACCP audit purposes', pageWidth - margin - 60, pageHeight - 10)
   }
 
   // Cover Page
   doc.setFontSize(24)
   doc.setTextColor(0, 100, 80)
-  doc.text('Relatório de Recebimentos', margin, 40)
+  doc.text('Goods Receipt Report', margin, 40)
 
   doc.setFontSize(14)
   doc.setTextColor(60, 60, 60)
-  doc.text(`Estabelecimento: ${options.siteName}`, margin, 55)
+  doc.text(`Establishment: ${options.siteName}`, margin, 55)
   if (options.siteAddress) {
     doc.setFontSize(11)
-    doc.text(`Endereço: ${options.siteAddress}`, margin, 62)
+    doc.text(`Address: ${options.siteAddress}`, margin, 62)
   }
 
   // Summary box
@@ -112,38 +194,38 @@ export async function generateGoodsReceiptReport(
 
   doc.setFontSize(12)
   doc.setTextColor(0, 100, 80)
-  doc.text('Resumo do Relatório', margin + 5, 80)
+  doc.text('Report Summary', margin + 5, 80)
 
   doc.setFontSize(10)
   doc.setTextColor(60, 60, 60)
-  doc.text(`Total de Recebimentos: ${receipts.length}`, margin + 5, 88)
+  doc.text(`Total Receipts: ${receipts.length}`, margin + 5, 88)
   
   const compliantCount = receipts.filter(r => r.temperatureCompliant).length
   const nonCompliantCount = receipts.length - compliantCount
   
-  doc.text(`Recebimentos Conformes: ${compliantCount}`, margin + 5, 94)
-  doc.text(`Recebimentos Não Conformes: ${nonCompliantCount}`, margin + 5, 100)
+  doc.text(`Compliant Receipts: ${compliantCount}`, margin + 5, 94)
+  doc.text(`Non-Compliant Receipts: ${nonCompliantCount}`, margin + 5, 100)
   
   const totalItems = receipts.reduce((sum, r) => sum + (r.items?.length || 0), 0)
-  doc.text(`Total de Itens Recebidos: ${totalItems}`, margin + 5, 106)
+  doc.text(`Total Items Received: ${totalItems}`, margin + 5, 106)
   
   const totalImages = receipts.reduce((sum, r) => sum + (r.images?.length || 0), 0)
-  doc.text(`Total de Imagens Anexadas: ${totalImages}`, margin + 5, 112)
+  doc.text(`Total Images Attached: ${totalImages}`, margin + 5, 112)
 
   // Filters info
   if (options.filters) {
     doc.setFontSize(10)
     doc.setTextColor(100, 100, 100)
     let filterY = 130
-    doc.text('Filtros Aplicados:', margin, filterY)
+    doc.text('Filters Applied:', margin, filterY)
     filterY += 6
     
     if (options.filters.startDate) {
-      doc.text(`- Data Inicial: ${options.filters.startDate}`, margin + 5, filterY)
+      doc.text(`- Start Date: ${options.filters.startDate}`, margin + 5, filterY)
       filterY += 5
     }
     if (options.filters.endDate) {
-      doc.text(`- Data Final: ${options.filters.endDate}`, margin + 5, filterY)
+      doc.text(`- End Date: ${options.filters.endDate}`, margin + 5, filterY)
       filterY += 5
     }
     if (options.filters.status && options.filters.status !== 'all') {
@@ -151,7 +233,7 @@ export async function generateGoodsReceiptReport(
       filterY += 5
     }
     if (options.filters.search) {
-      doc.text(`- Busca: "${options.filters.search}"`, margin + 5, filterY)
+      doc.text(`- Search: "${options.filters.search}"`, margin + 5, filterY)
     }
   }
 
@@ -168,7 +250,7 @@ export async function generateGoodsReceiptReport(
     // Receipt header
     doc.setFontSize(16)
     doc.setTextColor(0, 100, 80)
-    doc.text(`Recebimento #${i + 1}`, margin, yPos)
+    doc.text(`Receipt #${i + 1}`, margin, yPos)
     yPos += 8
 
     // Status badge
@@ -187,13 +269,13 @@ export async function generateGoodsReceiptReport(
     doc.setTextColor(60, 60, 60)
 
     const infoData = [
-      ['Fornecedor:', receipt.supplierName],
-      ['Data de Recebimento:', new Date(receipt.receivedAt).toLocaleString('pt-BR')],
-      ['Recebido por:', receipt.receivedByName],
-      ['NF/Romaneio:', receipt.invoiceNumber || 'N/A'],
-      ['Data da NF:', receipt.invoiceDate || 'N/A'],
-      ['Temperatura Média:', receipt.overallTemperature ? `${receipt.overallTemperature.toFixed(1)}°C` : 'N/A'],
-      ['Conformidade:', receipt.temperatureCompliant ? '✓ Conforme' : '✗ Não Conforme'],
+      ['Supplier:', receipt.supplierName],
+      ['Received Date:', new Date(receipt.receivedAt).toLocaleString('en-IE')],
+      ['Received by:', receipt.receivedByName],
+      ['Invoice #:', receipt.invoiceNumber || 'N/A'],
+      ['Invoice Date:', receipt.invoiceDate || 'N/A'],
+      ['Average Temperature:', receipt.overallTemperature ? `${receipt.overallTemperature.toFixed(1)}°C` : 'N/A'],
+      ['Compliance:', receipt.temperatureCompliant ? '✓ Compliant' : '✗ Non-Compliant'],
     ]
 
     autoTable(doc, {
@@ -214,7 +296,7 @@ export async function generateGoodsReceiptReport(
     if (receipt.notes) {
       doc.setFontSize(10)
       doc.setTextColor(80, 80, 80)
-      doc.text('Observações:', margin, yPos)
+      doc.text('Notes:', margin, yPos)
       yPos += 5
       doc.setTextColor(60, 60, 60)
       const splitNotes = doc.splitTextToSize(receipt.notes, pageWidth - margin * 2)
@@ -226,19 +308,19 @@ export async function generateGoodsReceiptReport(
     if (receipt.items && receipt.items.length > 0) {
       doc.setFontSize(12)
       doc.setTextColor(0, 100, 80)
-      doc.text('Itens Recebidos', margin, yPos)
+      doc.text('Items Received', margin, yPos)
       yPos += 6
 
       const itemsBody = receipt.items.map(item => [
         item.item_name,
         `${item.quantity} ${item.unit}`,
         item.temperature ? `${item.temperature.toFixed(1)}°C` : '--',
-        item.temperature_compliant ? 'OK' : 'Problema',
+        item.temperature_compliant ? 'OK' : 'Issue',
         CATEGORY_LABELS[item.category || ''] || item.category || '--',
       ])
 
       autoTable(doc, {
-        head: [['Item', 'Qtd', 'Temp.', 'Status', 'Categoria']],
+        head: [['Item', 'Qty', 'Temp.', 'Status', 'Category']],
         body: itemsBody,
         startY: yPos,
         margin: { left: margin, right: margin },
@@ -262,7 +344,7 @@ export async function generateGoodsReceiptReport(
         didParseCell: (data) => {
           if (data.section === 'body' && data.column.index === 3) {
             const value = data.cell.raw as string
-            if (value === 'Problema') {
+            if (value === 'Issue') {
               data.cell.styles.textColor = [200, 50, 50]
               data.cell.styles.fontStyle = 'bold'
             } else if (value === 'OK') {
@@ -279,41 +361,100 @@ export async function generateGoodsReceiptReport(
     if (receipt.images && receipt.images.length > 0) {
       doc.setFontSize(12)
       doc.setTextColor(0, 100, 80)
-      doc.text('Documentação (Imagens)', margin, yPos)
+      doc.text('Documentation (Images)', margin, yPos)
       yPos += 6
 
       const imageTypeLabels: Record<string, string> = {
-        delivery_note: 'Nota Fiscal/Romaneio',
-        protein_label: 'Rótulo de Rastreabilidade',
-        temperature_log: 'Registro de Temperatura',
-        other: 'Outros',
+        delivery_note: 'Delivery Note/Invoice',
+        protein_label: 'Traceability Label',
+        temperature_log: 'Temperature Log',
+        other: 'Other',
       }
 
-      const imagesBody = receipt.images.map(img => [
-        imageTypeLabels[img.imageType] || img.imageType,
-        img.pageNumber > 1 ? `Página ${img.pageNumber}` : 'Principal',
-        img.productName || '--',
-        img.batchNumber || '--',
-        img.useByDate || '--',
-        new Date(img.createdAt).toLocaleString('pt-BR'),
-      ])
+      if (options.includeImages) {
+        // Embed actual images
+        for (let imgIdx = 0; imgIdx < receipt.images.length; imgIdx++) {
+          const img = receipt.images[imgIdx]
+          
+          // Check if we need a new page
+          if (yPos > pageHeight - 100) {
+            doc.addPage()
+            addHeader(doc.getNumberOfPages(), receipts.length + 1)
+            yPos = 25
+          }
 
-      autoTable(doc, {
-        head: [['Tipo', 'Página', 'Produto', 'Lote', 'Validade', 'Data Captura']],
-        body: imagesBody,
-        startY: yPos,
-        margin: { left: margin, right: margin },
-        theme: 'striped',
-        headStyles: {
-          fillColor: [0, 100, 80],
-          textColor: [255, 255, 255],
-          fontSize: 8,
-        },
-        styles: {
-          fontSize: 8,
-          cellPadding: 2,
-        },
-      })
+          // Image label
+          doc.setFontSize(10)
+          doc.setTextColor(80, 80, 80)
+          const label = `${imageTypeLabels[img.imageType] || img.imageType}${img.pageNumber > 1 ? ` (Page ${img.pageNumber})` : ''}`
+          doc.text(label, margin, yPos)
+          yPos += 5
+
+          // Fetch and embed image
+          try {
+            const { getImagePublicUrl } = await import('./deliveryService')
+            const imageUrl = getImagePublicUrl(img.storagePath)
+            const base64Data = await imageToBase64(imageUrl)
+            
+            if (base64Data) {
+              const format = getImageFormat(img.storagePath)
+              
+              // Get original dimensions and calculate scaled size preserving aspect ratio
+              const { width: origWidth, height: origHeight } = await getImageDimensions(base64Data)
+              const maxWidth = pageWidth - margin * 2
+              const maxHeight = 100 // Maximum height to prevent images from taking too much space
+              
+              const { width: imgWidth, height: imgHeight } = calculateImageDimensions(
+                origWidth,
+                origHeight,
+                maxWidth,
+                maxHeight
+              )
+              
+              doc.addImage(base64Data, format, margin, yPos, imgWidth, imgHeight)
+              yPos += imgHeight + 10
+            } else {
+              doc.setFontSize(9)
+              doc.setTextColor(150, 150, 150)
+              doc.text('[Image not available]', margin, yPos)
+              yPos += 10
+            }
+          } catch (error) {
+            console.error('Error embedding image:', error)
+            doc.setFontSize(9)
+            doc.setTextColor(150, 150, 150)
+            doc.text('[Error loading image]', margin, yPos)
+            yPos += 10
+          }
+        }
+      } else {
+        // Just show table of images (original behavior)
+        const imagesBody = receipt.images.map(img => [
+          imageTypeLabels[img.imageType] || img.imageType,
+          img.pageNumber > 1 ? `Page ${img.pageNumber}` : 'Main',
+          img.productName || '--',
+          img.batchNumber || '--',
+          img.useByDate || '--',
+          new Date(img.createdAt).toLocaleString('en-IE'),
+        ])
+
+        autoTable(doc, {
+          head: [['Type', 'Page', 'Product', 'Batch', 'Use By', 'Capture Date']],
+          body: imagesBody,
+          startY: yPos,
+          margin: { left: margin, right: margin },
+          theme: 'striped',
+          headStyles: {
+            fillColor: [0, 100, 80],
+            textColor: [255, 255, 255],
+            fontSize: 8,
+          },
+          styles: {
+            fontSize: 8,
+            cellPadding: 2,
+          },
+        })
+      }
     }
 
     addFooter()
@@ -355,11 +496,11 @@ export function generateSummaryReport(
   // Header
   doc.setFontSize(18)
   doc.setTextColor(0, 100, 80)
-  doc.text(`Resumo de Recebimentos - ${options.siteName}`, margin, 20)
+  doc.text(`Receipts Summary - ${options.siteName}`, margin, 20)
 
   doc.setFontSize(10)
   doc.setTextColor(100, 100, 100)
-  doc.text(`Gerado em: ${new Date().toLocaleString('pt-BR')} por ${options.generatedBy}`, margin, 28)
+  doc.text(`Generated on: ${new Date().toLocaleString('en-IE')} by ${options.generatedBy}`, margin, 28)
 
   // Summary stats
   const compliantCount = receipts.filter(r => r.temperatureCompliant).length
@@ -367,14 +508,14 @@ export function generateSummaryReport(
   const totalItems = receipts.reduce((sum, r) => sum + (r.items?.length || 0), 0)
 
   const summaryData = [
-    ['Total de Recebimentos', receipts.length.toString()],
-    ['Conformes', compliantCount.toString()],
-    ['Não Conformes', nonCompliantCount.toString()],
-    ['Total de Itens', totalItems.toString()],
+    ['Total Receipts', receipts.length.toString()],
+    ['Compliant', compliantCount.toString()],
+    ['Non-Compliant', nonCompliantCount.toString()],
+    ['Total Items', totalItems.toString()],
   ]
 
   autoTable(doc, {
-    head: [['Métrica', 'Valor']],
+    head: [['Metric', 'Value']],
     body: summaryData,
     startY: 35,
     margin: { left: margin },
@@ -391,17 +532,17 @@ export function generateSummaryReport(
   // Main table
   const tableBody = receipts.map((r, idx) => [
     (idx + 1).toString(),
-    new Date(r.receivedAt).toLocaleDateString('pt-BR'),
+    new Date(r.receivedAt).toLocaleDateString('en-IE'),
     r.supplierName,
     r.invoiceNumber || '--',
     r.receivedByName,
     r.overallTemperature ? `${r.overallTemperature.toFixed(1)}°C` : '--',
-    r.temperatureCompliant ? 'Conforme' : 'Não Conforme',
+    r.temperatureCompliant ? 'Compliant' : 'Non-Compliant',
     STATUS_LABELS[r.status] || r.status,
   ])
 
   autoTable(doc, {
-    head: [['#', 'Data', 'Fornecedor', 'NF', 'Recebido por', 'Temp.', 'Conform.', 'Status']],
+    head: [['#', 'Date', 'Supplier', 'Invoice', 'Received by', 'Temp.', 'Compliance', 'Status']],
     body: tableBody,
     startY: 70,
     margin: { left: margin, right: margin },
@@ -428,7 +569,7 @@ export function generateSummaryReport(
     didParseCell: (data) => {
       if (data.section === 'body' && data.column.index === 6) {
         const value = data.cell.raw as string
-        if (value === 'Não Conforme') {
+        if (value === 'Non-Compliant') {
           data.cell.styles.textColor = [200, 50, 50]
         } else {
           data.cell.styles.textColor = [0, 150, 100]
@@ -440,7 +581,7 @@ export function generateSummaryReport(
   // Footer
   doc.setFontSize(8)
   doc.setTextColor(150, 150, 150)
-  doc.text('ChefVoice Kitchen Compliance - Documento para fins de auditoria HACCP', margin, doc.internal.pageSize.height - 10)
+  doc.text('ChefVoice Kitchen Compliance - Document for HACCP audit purposes', margin, doc.internal.pageSize.height - 10)
 
   return doc.output('blob')
 }

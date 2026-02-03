@@ -2,8 +2,8 @@ import { supabase } from '@/lib/supabase';
 import type { ComplianceLogData } from '@/components/haccp/types'; // Fixed type-only import
 
 /**
- * Simula um envio de dados de um sensor IoT (ex: Termômetro Bluetooth/Wi-Fi)
- * Pode ser chamado via console do navegador ou script externo.
+ * Simulates sending data from an IoT sensor (e.g., Bluetooth/Wi-Fi Thermometer)
+ * Can be called via browser console or external script.
  */
 export async function mockIotSensorReading(siteId: string, temp: number, unitName = 'Walk-in Fridge 1') {
   console.log(`📡 Simulating IoT Sensor: ${unitName} reading ${temp}°C...`);
@@ -13,7 +13,7 @@ export async function mockIotSensorReading(siteId: string, temp: number, unitNam
     temperature: temp,
     time_check: new Date().toLocaleTimeString('en-IE', { hour: '2-digit', minute: '2-digit' }),
     checked_by: 'IoT Sensor 01',
-    is_clean: true // Sensores geralmente só medem temp, assumimos clean ou ignoramos
+    is_clean: true // Sensors usually only measure temperature, we assume clean or ignore
   };
 
   const { data, error } = await ((supabase
@@ -22,7 +22,7 @@ export async function mockIotSensorReading(siteId: string, temp: number, unitNam
       site_id: siteId,
       schema_id: 'fsai_fridge_temp_v1',
       data: payload,
-      status: temp > 8 ? 'fail' : 'pass', // Lógica simples de validação no "Edge"
+      status: temp > 8 ? 'fail' : 'pass', // Simple validation logic at the "Edge"
       source: 'iot_sensor'
     })
     .select());
@@ -37,13 +37,13 @@ export async function mockIotSensorReading(siteId: string, temp: number, unitNam
 }
 
 /**
- * Salva um log vindo do App ou Voz
+ * Saves a log from the App or Voice
  */
 export async function saveComplianceLog(siteId: string, schemaId: string, data: ComplianceLogData, source: 'app' | 'voice' = 'app') {
     // Basic validation logic logic inside App before sending
     let status = 'pass';
     
-    // Exemplo de regra "Hardcoded" para demo (idealmente viria do Schema parser)
+    // Example of a "Hardcoded" rule for demo (ideally would come from Schema parser)
     if (data.temperature && Number(data.temperature) > 8) status = 'fail';
     if (data.assessment_pass === false) status = 'fail';
     if (data.verified_by_manager === false) status = 'fail';

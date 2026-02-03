@@ -29,18 +29,33 @@ const DEFAULT_OPTIONS: CompressionOptions = {
 }
 
 /**
- * Load an image from a File or Blob
+ * Load an image from a File or Blob with timeout
  */
-function loadImage(source: File | Blob | string): Promise<HTMLImageElement> {
+function loadImage(source: File | Blob | string, timeoutMs = 30000): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const img = new Image()
-    img.onload = () => resolve(img)
-    img.onerror = reject
-    
+    let objectUrl: string | null = null
+
+    const timeout = setTimeout(() => {
+      if (objectUrl) URL.revokeObjectURL(objectUrl)
+      reject(new Error(`Image load timed out after ${timeoutMs / 1000}s`))
+    }, timeoutMs)
+
+    img.onload = () => {
+      clearTimeout(timeout)
+      resolve(img)
+    }
+    img.onerror = (e) => {
+      clearTimeout(timeout)
+      if (objectUrl) URL.revokeObjectURL(objectUrl)
+      reject(new Error(`Failed to load image: ${e}`))
+    }
+
     if (typeof source === 'string') {
       img.src = source
     } else {
-      img.src = URL.createObjectURL(source)
+      objectUrl = URL.createObjectURL(source)
+      img.src = objectUrl
     }
   })
 }
@@ -83,7 +98,7 @@ export async function compressImage(
 
   // Load the image
   const img = await loadImage(file)
-  
+
   // Calculate new dimensions
   const { width, height } = calculateDimensions(
     img.width,
@@ -96,7 +111,7 @@ export async function compressImage(
   const canvas = document.createElement('canvas')
   canvas.width = width
   canvas.height = height
-  
+
   const ctx = canvas.getContext('2d')
   if (!ctx) {
     throw new Error('Could not get canvas context')
@@ -105,7 +120,7 @@ export async function compressImage(
   // Enable image smoothing for better quality
   ctx.imageSmoothingEnabled = true
   ctx.imageSmoothingQuality = 'high'
-  
+
   // Draw the image
   ctx.drawImage(img, 0, 0, width, height)
 
@@ -130,7 +145,7 @@ export async function compressImage(
   const base64 = await blobToBase64(blob)
 
   const compressedSize = blob.size
-  const compressionRatio = originalSize > 0 
+  const compressionRatio = originalSize > 0
     ? Math.round((1 - compressedSize / originalSize) * 100)
     : 0
 
@@ -162,17 +177,17 @@ export function blobToBase64(blob: Blob): Promise<string> {
  */
 export function base64ToBlob(base64: string, mimeType = 'image/jpeg'): Blob {
   // Remove data URL prefix if present
-  const base64Data = base64.includes(',') 
-    ? base64.split(',')[1] 
+  const base64Data = base64.includes(',')
+    ? base64.split(',')[1]
     : base64
 
   const byteCharacters = atob(base64Data)
   const byteNumbers = new Array(byteCharacters.length)
-  
+
   for (let i = 0; i < byteCharacters.length; i++) {
     byteNumbers[i] = byteCharacters.charCodeAt(i)
   }
-  
+
   const byteArray = new Uint8Array(byteNumbers)
   return new Blob([byteArray], { type: mimeType })
 }
@@ -186,13 +201,13 @@ export async function compressImages(
   onProgress?: (index: number, total: number) => void
 ): Promise<CompressionResult[]> {
   const results: CompressionResult[] = []
-  
+
   for (let i = 0; i < files.length; i++) {
     const result = await compressImage(files[i], options)
     results.push(result)
     onProgress?.(i + 1, files.length)
   }
-  
+
   return results
 }
 

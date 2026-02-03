@@ -9,9 +9,10 @@ interface FridgeTempModalProps {
   isOpen: boolean
   onClose: () => void
   onSuccess?: () => void
+  preselectedFridgeIndex?: number
 }
 
-export function FridgeTempModal({ isOpen, onClose, onSuccess }: FridgeTempModalProps) {
+export function FridgeTempModal({ isOpen, onClose, onSuccess, preselectedFridgeIndex }: FridgeTempModalProps) {
   const { currentSite, settings, staffMembers } = useAppStore()
   
   const [fridges, setFridges] = useState<Fridge[]>([])
@@ -29,6 +30,13 @@ export function FridgeTempModal({ isOpen, onClose, onSuccess }: FridgeTempModalP
       loadFridges()
     }
   }, [isOpen, currentSite?.id])
+
+  // Apply preselected fridge index when provided
+  useEffect(() => {
+    if (preselectedFridgeIndex !== undefined && preselectedFridgeIndex >= 0) {
+      setSelectedFridgeIndex(preselectedFridgeIndex)
+    }
+  }, [preselectedFridgeIndex, isOpen])
 
   const loadFridges = async () => {
     if (!currentSite?.id) return

@@ -31,8 +31,8 @@ export const supabase = supabaseClient as SupabaseClient<Database>
 // Helper to get the raw client for auth operations
 export const getSupabaseClient = () => supabaseClient
 
-// Demo site/venue ID (created in database)
-export const DEMO_SITE_ID = 'b0eebc99-9c0b-4ef8-bb6d-6bb9bd380a12'
+// Demo site/venue ID (created in database - must match migration)
+export const DEMO_SITE_ID = 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11'
 
 // Re-export database types
 export type { Database }

@@ -1,8 +1,8 @@
 import { useState, useRef } from 'react'
-import { 
-  ArrowLeft, Camera, Upload, Scan, Package, Thermometer, 
+import {
+  ArrowLeft, Camera, Upload, Scan, Package, Thermometer,
   User, Building2, CheckCircle, X, Loader2,
-  Plus, Trash2, FileText, AlertTriangle, Cpu, Zap, Settings,
+  Plus, Trash2, FileText, AlertTriangle, Zap, Settings,
   Snowflake, Sun, Wind, Image, ChevronLeft, ChevronRight, Layers,
   Tag, Beef, Calendar, Hash
 } from 'lucide-react'
@@ -10,12 +10,12 @@ import { cn } from '@/lib/utils'
 import { useAppStore, type OCRModel } from '@/store/useAppStore'
 import { toast } from 'sonner'
 import { processInvoiceImage, isProviderAvailable, OCR_MODEL_INFO } from '@/services/ocrService'
-import { 
-  createGoodsReceipt, 
-  uploadDeliveryImage, 
+import {
+  createGoodsReceipt,
+  uploadDeliveryImage,
   type ReceiptItemInput,
 } from '@/services/deliveryService'
-import { formatFileSize } from '@/lib/imageCompression'
+import { formatFileSize, compressImage, COMPRESSION_PRESETS } from '@/lib/imageCompression'
 
 interface GoodsReceiptScreenProps {
   onBack: () => void
@@ -26,29 +26,29 @@ interface GoodsReceiptScreenProps {
 type TempCategory = 'ambient' | 'chilled' | 'frozen'
 
 const TEMP_CATEGORIES: Record<TempCategory, { label: string; icon: typeof Sun; color: string; bgColor: string; range: string; maxTemp: number }> = {
-  ambient: { 
-    label: 'Ambient', 
-    icon: Sun, 
-    color: 'text-amber-500', 
+  ambient: {
+    label: 'Ambient',
+    icon: Sun,
+    color: 'text-amber-500',
     bgColor: 'bg-amber-500/10',
     range: 'Room temperature',
-    maxTemp: 25 
+    maxTemp: 25
   },
-  chilled: { 
-    label: 'Chilled', 
-    icon: Wind, 
-    color: 'text-cyan-500', 
+  chilled: {
+    label: 'Chilled',
+    icon: Wind,
+    color: 'text-cyan-500',
     bgColor: 'bg-cyan-500/10',
     range: '0°C to 5°C',
-    maxTemp: 5 
+    maxTemp: 5
   },
-  frozen: { 
-    label: 'Frozen', 
-    icon: Snowflake, 
-    color: 'text-blue-500', 
+  frozen: {
+    label: 'Frozen',
+    icon: Snowflake,
+    color: 'text-blue-500',
     bgColor: 'bg-blue-500/10',
     range: '-18°C or below',
-    maxTemp: -18 
+    maxTemp: -18
   },
 }
 
@@ -115,46 +115,59 @@ export function GoodsReceiptScreen({ onBack, onNavigate }: GoodsReceiptScreenPro
   const [isScanning, setIsScanning] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [submitProgress, setSubmitProgress] = useState<string | null>(null)
-  
+
   // Multi-page delivery note state
   const [scannedPages, setScannedPages] = useState<ScannedPage[]>([])
   const [currentPageIndex, setCurrentPageIndex] = useState(0)
   const [processingPageId, setProcessingPageId] = useState<string | null>(null)
-  
+
   // Protein labels state
   const [proteinLabels, setProteinLabels] = useState<ProteinLabel[]>([])
   const [isCapturingLabel, setIsCapturingLabel] = useState(false)
-  
+
   const [ocrConfidence, setOcrConfidence] = useState<number | null>(null)
   const [ocrResult, setOcrResult] = useState<{ provider: string; model: string } | null>(null)
   const [scanProgress, setScanProgress] = useState<{ progress: number; status: string } | null>(null)
   const [activeCategory, setActiveCategory] = useState<TempCategory | 'all'>('all')
-  
+
   // Refs for file inputs
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const cameraInputRef = useRef<HTMLInputElement>(null)
   const addPageInputRef = useRef<HTMLInputElement>(null)
   const labelCameraRef = useRef<HTMLInputElement>(null)
   const labelFileRef = useRef<HTMLInputElement>(null)
-  
+
   // Get current OCR settings
-  const ocrProvider = settings.ocrProvider || 'tesseract'
-  const ocrModel = settings.ocrModel || 'tesseract'
+  const ocrProvider = settings.ocrProvider || 'openrouter'
+  const ocrModel = settings.ocrModel || 'google/gemini-2.0-flash'
   const isOcrConfigured = isProviderAvailable(ocrProvider, {
     openaiApiKey: settings.openaiApiKey,
     openrouterApiKey: settings.openrouterApiKey,
   })
-  
+
   const modelInfo = OCR_MODEL_INFO[ocrModel]
 
   // Process a single page with OCR
   const processPage = async (page: ScannedPage, file: File) => {
     setProcessingPageId(page.id)
-    setScanProgress({ progress: 0, status: `Processing page ${page.pageNumber}...` })
-    
+
     try {
+      let fileToProcess = file
+
+      // Compress large images (> 2MB) to prevent mobile network timeouts
+      if (file.size > 2 * 1024 * 1024) {
+        setScanProgress({ progress: 5, status: `Compressing large image...` })
+        console.log(`📸 Compressing large image: ${formatFileSize(file.size)}`)
+        const compressed = await compressImage(file, COMPRESSION_PRESETS.deliveryNote)
+        console.log(`📸 Compressed: ${formatFileSize(file.size)} → ${formatFileSize(compressed.compressedSize)} (${compressed.compressionRatio}% reduction)`)
+        fileToProcess = new File([compressed.blob], file.name, { type: compressed.blob.type })
+      } else {
+        console.log(`☁️ Using original file (${formatFileSize(file.size)}) - small enough for direct upload`)
+      }
+
+      setScanProgress({ progress: 10, status: `Processing page ${page.pageNumber}...` })
+
       const ocrResultData = await processInvoiceImage(
-        file, 
+        fileToProcess,
         {
           provider: ocrProvider,
           model: ocrModel,
@@ -162,17 +175,19 @@ export function GoodsReceiptScreen({ onBack, onNavigate }: GoodsReceiptScreenPro
           openrouterApiKey: settings.openrouterApiKey,
         },
         (progress, status) => {
-          setScanProgress({ progress, status: `Page ${page.pageNumber}: ${status}` })
+          // Scale progress from 10-100
+          const scaledProgress = 10 + Math.round(progress * 0.9)
+          setScanProgress({ progress: scaledProgress, status: `Page ${page.pageNumber}: ${status}` })
         }
       )
-      
+
       if (ocrResultData) {
         const itemsWithCategory: ReceiptItem[] = ocrResultData.items.map(item => ({
           ...item,
           tempCategory: 'chilled' as TempCategory,
           pageNumber: page.pageNumber,
         }))
-        
+
         if (page.pageNumber === 1) {
           setReceipt(prev => ({
             ...prev,
@@ -187,22 +202,23 @@ export function GoodsReceiptScreen({ onBack, onNavigate }: GoodsReceiptScreenPro
             items: [...prev.items, ...itemsWithCategory],
           }))
         }
-        
-        setScannedPages(prev => prev.map(p => 
-          p.id === page.id 
+
+        setScannedPages(prev => prev.map(p =>
+          p.id === page.id
             ? { ...p, processed: true, itemCount: itemsWithCategory.length }
             : p
         ))
-        
+
         setOcrConfidence(ocrResultData.confidence)
         setOcrResult({ provider: ocrResultData.provider, model: ocrResultData.model })
-        
+
         const providerName = OCR_MODEL_INFO[ocrResultData.model as OCRModel]?.name || ocrResultData.model
         toast.success(`Page ${page.pageNumber}: ${itemsWithCategory.length} items extracted via ${providerName}`)
       }
     } catch (error) {
       console.error('OCR error:', error)
-      toast.error(`Failed to scan page ${page.pageNumber}`)
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+      toast.error(`Page ${page.pageNumber} failed: ${errorMessage.substring(0, 100)}`)
     } finally {
       setProcessingPageId(null)
       setScanProgress(null)
@@ -215,24 +231,24 @@ export function GoodsReceiptScreen({ onBack, onNavigate }: GoodsReceiptScreenPro
     if (files.length === 0) return
 
     setIsScanning(true)
-    
+
     const startPageNum = isAddingPage ? scannedPages.length + 1 : 1
-    
+
     if (!isAddingPage) {
       setScannedPages([])
       setReceipt(prev => ({ ...prev, items: [] }))
     }
-    
+
     for (let i = 0; i < files.length; i++) {
       const file = files[i]
       const pageNum = startPageNum + i
-      
+
       const imageData = await new Promise<string>((resolve) => {
         const reader = new FileReader()
         reader.onload = (event) => resolve(event.target?.result as string)
         reader.readAsDataURL(file)
       })
-      
+
       const newPage: ScannedPage = {
         id: crypto.randomUUID(),
         imageData,
@@ -241,13 +257,13 @@ export function GoodsReceiptScreen({ onBack, onNavigate }: GoodsReceiptScreenPro
         processed: false,
         itemCount: 0,
       }
-      
+
       setScannedPages(prev => [...prev, newPage])
       setCurrentPageIndex(isAddingPage ? scannedPages.length : i)
-      
+
       await processPage(newPage, file)
     }
-    
+
     setIsScanning(false)
     e.target.value = ''
   }
@@ -258,14 +274,14 @@ export function GoodsReceiptScreen({ onBack, onNavigate }: GoodsReceiptScreenPro
     if (files.length === 0) return
 
     setIsCapturingLabel(true)
-    
+
     for (const file of files) {
       const imageData = await new Promise<string>((resolve) => {
         const reader = new FileReader()
         reader.onload = (event) => resolve(event.target?.result as string)
         reader.readAsDataURL(file)
       })
-      
+
       const newLabel: ProteinLabel = {
         id: crypto.randomUUID(),
         imageData,
@@ -275,10 +291,10 @@ export function GoodsReceiptScreen({ onBack, onNavigate }: GoodsReceiptScreenPro
         useByDate: '',
         supplierCode: '',
       }
-      
+
       setProteinLabels(prev => [...prev, newLabel])
     }
-    
+
     setIsCapturingLabel(false)
     toast.success(`${files.length} label(s) captured`)
     e.target.value = ''
@@ -286,7 +302,7 @@ export function GoodsReceiptScreen({ onBack, onNavigate }: GoodsReceiptScreenPro
 
   // Update protein label field
   const updateLabel = (id: string, field: keyof ProteinLabel, value: string) => {
-    setProteinLabels(prev => prev.map(label => 
+    setProteinLabels(prev => prev.map(label =>
       label.id === id ? { ...label, [field]: value } : label
     ))
   }
@@ -301,17 +317,17 @@ export function GoodsReceiptScreen({ onBack, onNavigate }: GoodsReceiptScreenPro
   const removePage = (pageId: string) => {
     const pageToRemove = scannedPages.find(p => p.id === pageId)
     if (!pageToRemove) return
-    
+
     setReceipt(prev => ({
       ...prev,
       items: prev.items.filter(item => item.pageNumber !== pageToRemove.pageNumber),
     }))
-    
+
     setScannedPages(prev => {
       const filtered = prev.filter(p => p.id !== pageId)
       return filtered.map((p, idx) => ({ ...p, pageNumber: idx + 1 }))
     })
-    
+
     setReceipt(prev => ({
       ...prev,
       items: prev.items.map(item => {
@@ -321,11 +337,11 @@ export function GoodsReceiptScreen({ onBack, onNavigate }: GoodsReceiptScreenPro
         return item
       }),
     }))
-    
+
     if (currentPageIndex >= scannedPages.length - 1) {
       setCurrentPageIndex(Math.max(0, scannedPages.length - 2))
     }
-    
+
     toast.success(`Page ${pageToRemove.pageNumber} removed`)
   }
 
@@ -357,7 +373,7 @@ export function GoodsReceiptScreen({ onBack, onNavigate }: GoodsReceiptScreenPro
   const updateItem = (id: string, field: keyof ReceiptItem, value: string) => {
     setReceipt(prev => ({
       ...prev,
-      items: prev.items.map(item => 
+      items: prev.items.map(item =>
         item.id === id ? { ...item, [field]: value } : item
       ),
     }))
@@ -373,18 +389,18 @@ export function GoodsReceiptScreen({ onBack, onNavigate }: GoodsReceiptScreenPro
   const applyGroupTemp = (category: TempCategory, temp: string) => {
     setReceipt(prev => ({
       ...prev,
-      items: prev.items.map(item => 
+      items: prev.items.map(item =>
         item.tempCategory === category ? { ...item, temperature: temp } : item
       ),
     }))
-    
+
     const count = receipt.items.filter(i => i.tempCategory === category).length
     if (count > 0) {
       toast.success(`Applied ${temp}°C to ${count} ${TEMP_CATEGORIES[category].label.toLowerCase()} items`)
     }
   }
 
-  const getItemsByCategory = (category: TempCategory) => 
+  const getItemsByCategory = (category: TempCategory) =>
     receipt.items.filter(item => item.tempCategory === category)
 
   const isValid = () => {
@@ -411,24 +427,35 @@ export function GoodsReceiptScreen({ onBack, onNavigate }: GoodsReceiptScreenPro
 
     setIsSubmitting(true)
     setSubmitProgress('Creating receipt...')
-    
+
     try {
       // Get staff name
       const selectedStaff = staffMembers.find(s => s.id === receipt.receivedBy)
       const receivedByName = selectedStaff?.name || 'Unknown'
-      
+
       // Convert items
       const items: ReceiptItemInput[] = receipt.items.map((item, idx) => ({
         itemName: item.name,
         quantity: parseFloat(item.quantity) || 1,
         unit: item.unit,
         temperature: item.temperature ? parseFloat(item.temperature) : undefined,
-        temperatureCompliant: item.temperature 
-          ? isTempCompliant(item.temperature, item.tempCategory) ?? true 
+        temperatureCompliant: item.temperature
+          ? isTempCompliant(item.temperature, item.tempCategory) ?? true
           : true,
         category: item.tempCategory as any,
         sortOrder: idx,
       }))
+
+      // Calculate overall temperature (average of all item temperatures)
+      const temps = items
+        .map(item => item.temperature)
+        .filter((t): t is number => t !== undefined && !isNaN(t))
+      const overallTemperature = temps.length > 0
+        ? temps.reduce((sum, t) => sum + t, 0) / temps.length
+        : undefined
+      const overallCompliant = items.length > 0
+        ? items.every(item => item.temperatureCompliant)
+        : true
 
       // Create the goods receipt
       const result = await createGoodsReceipt({
@@ -439,6 +466,8 @@ export function GoodsReceiptScreen({ onBack, onNavigate }: GoodsReceiptScreenPro
         receivedByStaffId: receipt.receivedBy || undefined,
         receivedByName,
         receivedAt: receipt.receivedAt || new Date().toISOString(),
+        overallTemperature,
+        temperatureCompliant: overallCompliant,
         ocrRawText: ocrResult ? `Provider: ${ocrResult.provider}, Model: ${ocrResult.model}` : undefined,
         ocrConfidence: ocrConfidence || undefined,
         notes: receipt.notes || undefined,
@@ -455,11 +484,11 @@ export function GoodsReceiptScreen({ onBack, onNavigate }: GoodsReceiptScreenPro
       // Upload delivery note pages
       if (scannedPages.length > 0) {
         setSubmitProgress(`Uploading ${scannedPages.length} delivery note page(s)...`)
-        
+
         for (let i = 0; i < scannedPages.length; i++) {
           const page = scannedPages[i]
           setSubmitProgress(`Uploading delivery note page ${i + 1}/${scannedPages.length}...`)
-          
+
           const uploaded = await uploadDeliveryImage({
             receiptId,
             imageType: 'delivery_note',
@@ -468,7 +497,7 @@ export function GoodsReceiptScreen({ onBack, onNavigate }: GoodsReceiptScreenPro
             pageNumber: page.pageNumber,
             ocrProcessed: page.processed,
           })
-          
+
           if (uploaded) {
             console.log(`📄 Page ${i + 1} uploaded: ${formatFileSize(uploaded.compressedSizeBytes || 0)}`)
           }
@@ -478,11 +507,11 @@ export function GoodsReceiptScreen({ onBack, onNavigate }: GoodsReceiptScreenPro
       // Upload protein labels
       if (proteinLabels.length > 0) {
         setSubmitProgress(`Uploading ${proteinLabels.length} protein label(s)...`)
-        
+
         for (let i = 0; i < proteinLabels.length; i++) {
           const label = proteinLabels[i]
           setSubmitProgress(`Uploading protein label ${i + 1}/${proteinLabels.length}...`)
-          
+
           const uploaded = await uploadDeliveryImage({
             receiptId,
             imageType: 'protein_label',
@@ -495,15 +524,15 @@ export function GoodsReceiptScreen({ onBack, onNavigate }: GoodsReceiptScreenPro
             supplierCode: label.supplierCode || undefined,
             ocrProcessed: false,
           })
-          
+
           if (uploaded) {
             console.log(`🏷️ Label ${i + 1} uploaded: ${formatFileSize(uploaded.compressedSizeBytes || 0)}`)
           }
         }
       }
-      
+
       toast.success('Goods receipt recorded successfully!')
-      
+
       // Reset form
       setReceipt(INITIAL_RECEIPT)
       setScannedPages([])
@@ -511,7 +540,7 @@ export function GoodsReceiptScreen({ onBack, onNavigate }: GoodsReceiptScreenPro
       setOcrConfidence(null)
       setOcrResult(null)
       setCurrentPageIndex(0)
-      
+
     } catch (error) {
       console.error('Submit error:', error)
       toast.error('Failed to save receipt')
@@ -528,8 +557,8 @@ export function GoodsReceiptScreen({ onBack, onNavigate }: GoodsReceiptScreenPro
     return category === 'frozen' ? tempNum <= maxTemp : tempNum <= maxTemp
   }
 
-  const filteredItems = activeCategory === 'all' 
-    ? receipt.items 
+  const filteredItems = activeCategory === 'all'
+    ? receipt.items
     : receipt.items.filter(item => item.tempCategory === activeCategory)
 
   const currentPage = scannedPages[currentPageIndex]
@@ -570,27 +599,17 @@ export function GoodsReceiptScreen({ onBack, onNavigate }: GoodsReceiptScreenPro
                 </span>
               )}
             </h2>
-            
+
             <div className="flex items-center gap-2">
               <div className={cn(
                 "flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium",
                 ocrProvider === 'openrouter' ? "bg-purple-500/20 text-purple-400" :
-                ocrProvider === 'openai' ? "bg-sky-500/20 text-sky-400" :
-                "bg-emerald-500/20 text-emerald-400"
+                  "bg-sky-500/20 text-sky-400"
               )}>
-                {ocrProvider === 'tesseract' ? (
-                  <>
-                    <Cpu className="w-3.5 h-3.5" />
-                    Tesseract (Free)
-                  </>
-                ) : (
-                  <>
-                    <Zap className="w-3.5 h-3.5" />
-                    {modelInfo?.name || ocrModel}
-                  </>
-                )}
+                <Zap className="w-3.5 h-3.5" />
+                {modelInfo?.name || ocrModel}
               </div>
-              
+
               {onNavigate && (
                 <button
                   onClick={() => onNavigate('settings')}
@@ -604,19 +623,7 @@ export function GoodsReceiptScreen({ onBack, onNavigate }: GoodsReceiptScreenPro
           </div>
 
           {scannedPages.length === 0 ? (
-            <div className="flex flex-col sm:flex-row gap-4">
-              <button
-                onClick={() => cameraInputRef.current?.click()}
-                disabled={isScanning}
-                className="flex-1 p-6 bg-theme-secondary rounded-xl border-2 border-dashed border-theme-primary hover:border-emerald-500 transition-colors flex flex-col items-center gap-3"
-              >
-                <div className="w-14 h-14 rounded-full bg-emerald-500/20 flex items-center justify-center">
-                  <Camera className="w-7 h-7 text-emerald-500" />
-                </div>
-                <span className="font-medium text-theme-primary">Take Photo</span>
-                <span className="text-sm text-theme-muted">Use camera to scan DN</span>
-              </button>
-
+            <div className="flex flex-col gap-4">
               <button
                 onClick={() => fileInputRef.current?.click()}
                 disabled={isScanning}
@@ -626,17 +633,9 @@ export function GoodsReceiptScreen({ onBack, onNavigate }: GoodsReceiptScreenPro
                   <Upload className="w-7 h-7 text-cyan-500" />
                 </div>
                 <span className="font-medium text-theme-primary">Upload File(s)</span>
-                <span className="text-sm text-theme-muted">Select one or more images</span>
+                <span className="text-sm text-theme-muted">Select images or take a photo</span>
               </button>
 
-              <input
-                ref={cameraInputRef}
-                type="file"
-                accept="image/*"
-                capture="environment"
-                onChange={(e) => handleFileUpload(e, false)}
-                className="hidden"
-              />
               <input
                 ref={fileInputRef}
                 type="file"
@@ -655,13 +654,13 @@ export function GoodsReceiptScreen({ onBack, onNavigate }: GoodsReceiptScreenPro
                     onClick={() => setCurrentPageIndex(idx)}
                     className={cn(
                       "relative flex-shrink-0 w-16 h-20 rounded-lg overflow-hidden border-2 transition-all",
-                      currentPageIndex === idx 
-                        ? "border-emerald-500 ring-2 ring-emerald-500/30" 
+                      currentPageIndex === idx
+                        ? "border-emerald-500 ring-2 ring-emerald-500/30"
                         : "border-theme-primary hover:border-theme-secondary"
                     )}
                   >
-                    <img 
-                      src={page.imageData} 
+                    <img
+                      src={page.imageData}
                       alt={`Page ${page.pageNumber}`}
                       className="w-full h-full object-cover"
                     />
@@ -680,7 +679,7 @@ export function GoodsReceiptScreen({ onBack, onNavigate }: GoodsReceiptScreenPro
                     )}
                   </button>
                 ))}
-                
+
                 <button
                   onClick={() => addPageInputRef.current?.click()}
                   disabled={isScanning}
@@ -689,7 +688,7 @@ export function GoodsReceiptScreen({ onBack, onNavigate }: GoodsReceiptScreenPro
                   <Plus className="w-5 h-5" />
                   <span className="text-[10px]">Add</span>
                 </button>
-                
+
                 <input
                   ref={addPageInputRef}
                   type="file"
@@ -707,7 +706,7 @@ export function GoodsReceiptScreen({ onBack, onNavigate }: GoodsReceiptScreenPro
                     alt={`Page ${currentPage.pageNumber}`}
                     className="w-full max-h-64 object-contain rounded-xl bg-black/20"
                   />
-                  
+
                   {scannedPages.length > 1 && (
                     <>
                       <button
@@ -726,7 +725,7 @@ export function GoodsReceiptScreen({ onBack, onNavigate }: GoodsReceiptScreenPro
                       </button>
                     </>
                   )}
-                  
+
                   <button
                     onClick={() => removePage(currentPage.id)}
                     className="absolute top-2 right-2 p-2 bg-red-500/80 rounded-lg hover:bg-red-500 transition-colors"
@@ -734,7 +733,7 @@ export function GoodsReceiptScreen({ onBack, onNavigate }: GoodsReceiptScreenPro
                   >
                     <X className="w-4 h-4 text-white" />
                   </button>
-                  
+
                   <div className="absolute top-2 left-2 flex items-center gap-2">
                     <span className="px-2 py-1 bg-black/70 text-white text-xs rounded-lg flex items-center gap-1">
                       <Layers className="w-3 h-3" />
@@ -752,7 +751,7 @@ export function GoodsReceiptScreen({ onBack, onNavigate }: GoodsReceiptScreenPro
               {ocrConfidence !== null && ocrResult && (
                 <div className={cn(
                   "flex items-center gap-2 px-4 py-2 rounded-lg text-sm",
-                  ocrConfidence > 70 
+                  ocrConfidence > 70
                     ? "bg-emerald-500/20 text-emerald-400"
                     : "bg-amber-500/20 text-amber-400"
                 )}>
@@ -794,7 +793,7 @@ export function GoodsReceiptScreen({ onBack, onNavigate }: GoodsReceiptScreenPro
                   <span className="text-theme-muted">{scanProgress.status}</span>
                   {scanProgress.progress > 0 && (
                     <div className="w-full max-w-xs bg-theme-secondary rounded-full h-2 overflow-hidden">
-                      <div 
+                      <div
                         className="h-full bg-emerald-500 transition-all duration-300"
                         style={{ width: `${scanProgress.progress}%` }}
                       />
@@ -806,16 +805,16 @@ export function GoodsReceiptScreen({ onBack, onNavigate }: GoodsReceiptScreenPro
               )}
             </div>
           )}
-          
+
           {scannedPages.length === 0 && (
             <div className="mt-4 p-3 bg-theme-ghost rounded-lg text-xs text-theme-muted">
-              {!isOcrConfigured && ocrProvider !== 'tesseract' ? (
+              {!isOcrConfigured ? (
                 <p className="flex items-center gap-2 text-amber-500">
                   <AlertTriangle className="w-4 h-4 flex-shrink-0" />
                   <span>
-                    {ocrProvider === 'openai' ? 'OpenAI' : 'OpenRouter'} API key not configured. 
+                    API key not configured. Add your OpenAI or OpenRouter key in Settings to enable OCR scanning.
                     {onNavigate && (
-                      <button 
+                      <button
                         onClick={() => onNavigate('settings')}
                         className="underline ml-1"
                       >
@@ -855,7 +854,7 @@ export function GoodsReceiptScreen({ onBack, onNavigate }: GoodsReceiptScreenPro
           </div>
 
           <p className="text-sm text-theme-muted mb-4">
-            Capture photos of protein labels (beef, poultry, seafood) for FSAI traceability compliance. 
+            Capture photos of protein labels (beef, poultry, seafood) for FSAI traceability compliance.
             No OCR required - just scan and optionally add batch details.
           </p>
 
@@ -918,7 +917,7 @@ export function GoodsReceiptScreen({ onBack, onNavigate }: GoodsReceiptScreenPro
           {proteinLabels.length > 0 && (
             <div className="space-y-4">
               {proteinLabels.map((label, idx) => (
-                <div 
+                <div
                   key={label.id}
                   className="p-4 bg-rose-500/5 border border-rose-500/30 rounded-xl"
                 >
@@ -1081,13 +1080,13 @@ export function GoodsReceiptScreen({ onBack, onNavigate }: GoodsReceiptScreenPro
               const Icon = config.icon
               const count = getItemsByCategory(cat).length
               const tempField = `${cat}Temp` as 'ambientTemp' | 'chilledTemp' | 'frozenTemp'
-              
+
               return (
-                <div 
+                <div
                   key={cat}
                   className={cn(
                     "p-4 rounded-xl border-2 transition-all",
-                    count > 0 
+                    count > 0
                       ? `border-${cat === 'ambient' ? 'amber' : cat === 'chilled' ? 'cyan' : 'blue'}-500/50 ${config.bgColor}`
                       : "border-theme-primary bg-theme-secondary opacity-50"
                   )}
@@ -1115,7 +1114,7 @@ export function GoodsReceiptScreen({ onBack, onNavigate }: GoodsReceiptScreenPro
                       className={cn(
                         "px-3 py-2 text-white rounded-lg text-sm font-medium disabled:opacity-50",
                         cat === 'ambient' ? 'bg-amber-500' :
-                        cat === 'chilled' ? 'bg-cyan-500' : 'bg-blue-500'
+                          cat === 'chilled' ? 'bg-cyan-500' : 'bg-blue-500'
                       )}
                     >
                       Apply
@@ -1140,8 +1139,8 @@ export function GoodsReceiptScreen({ onBack, onNavigate }: GoodsReceiptScreenPro
                   onClick={() => setActiveCategory('all')}
                   className={cn(
                     "px-3 py-1 rounded text-xs font-medium transition-colors",
-                    activeCategory === 'all' 
-                      ? "bg-theme-card text-theme-primary shadow" 
+                    activeCategory === 'all'
+                      ? "bg-theme-card text-theme-primary shadow"
                       : "text-theme-muted hover:text-theme-primary"
                   )}
                 >
@@ -1153,8 +1152,8 @@ export function GoodsReceiptScreen({ onBack, onNavigate }: GoodsReceiptScreenPro
                     onClick={() => setActiveCategory(cat)}
                     className={cn(
                       "px-2 py-1 rounded text-xs font-medium transition-colors flex items-center gap-1",
-                      activeCategory === cat 
-                        ? "bg-theme-card text-theme-primary shadow" 
+                      activeCategory === cat
+                        ? "bg-theme-card text-theme-primary shadow"
                         : "text-theme-muted hover:text-theme-primary"
                     )}
                   >
@@ -1202,26 +1201,26 @@ export function GoodsReceiptScreen({ onBack, onNavigate }: GoodsReceiptScreenPro
                 const catConfig = TEMP_CATEGORIES[item.tempCategory]
                 const TempIcon = catConfig.icon
                 return (
-                  <div 
+                  <div
                     key={item.id}
                     className={cn(
                       "p-4 rounded-xl border",
                       catConfig.bgColor,
                       item.tempCategory === 'ambient' ? "border-amber-500/30" :
-                      item.tempCategory === 'chilled' ? "border-cyan-500/30" :
-                      "border-blue-500/30"
+                        item.tempCategory === 'chilled' ? "border-cyan-500/30" :
+                          "border-blue-500/30"
                     )}
                   >
                     <div className="flex items-start gap-3">
                       <div className={cn(
                         "w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 mt-1",
                         item.tempCategory === 'ambient' ? "bg-amber-500/20" :
-                        item.tempCategory === 'chilled' ? "bg-cyan-500/20" :
-                        "bg-blue-500/20"
+                          item.tempCategory === 'chilled' ? "bg-cyan-500/20" :
+                            "bg-blue-500/20"
                       )}>
                         <TempIcon className={cn("w-4 h-4", catConfig.color)} />
                       </div>
-                      
+
                       <div className="flex-1 grid sm:grid-cols-5 gap-3">
                         <div className="sm:col-span-2">
                           <label className="text-xs text-theme-muted block mb-1">
@@ -1238,7 +1237,7 @@ export function GoodsReceiptScreen({ onBack, onNavigate }: GoodsReceiptScreenPro
                             className="w-full px-3 py-2 bg-theme-card border border-theme-primary rounded-lg text-sm text-theme-primary focus:outline-none focus:border-emerald-500"
                           />
                         </div>
-                        
+
                         <div>
                           <label className="text-xs text-theme-muted block mb-1">Quantity *</label>
                           <div className="flex gap-1">
@@ -1263,7 +1262,7 @@ export function GoodsReceiptScreen({ onBack, onNavigate }: GoodsReceiptScreenPro
                             </select>
                           </div>
                         </div>
-                        
+
                         <div>
                           <label className="text-xs text-theme-muted block mb-1">Category</label>
                           <select
@@ -1272,8 +1271,8 @@ export function GoodsReceiptScreen({ onBack, onNavigate }: GoodsReceiptScreenPro
                             className={cn(
                               "w-full px-2 py-2 border rounded-lg text-sm focus:outline-none",
                               item.tempCategory === 'ambient' ? "bg-amber-500/10 border-amber-500/30" :
-                              item.tempCategory === 'chilled' ? "bg-cyan-500/10 border-cyan-500/30" :
-                              "bg-blue-500/10 border-blue-500/30"
+                                item.tempCategory === 'chilled' ? "bg-cyan-500/10 border-cyan-500/30" :
+                                  "bg-blue-500/10 border-blue-500/30"
                             )}
                           >
                             <option value="ambient">☀️ Ambient</option>
@@ -1281,7 +1280,7 @@ export function GoodsReceiptScreen({ onBack, onNavigate }: GoodsReceiptScreenPro
                             <option value="frozen">🧊 Frozen</option>
                           </select>
                         </div>
-                        
+
                         <div>
                           <label className="text-xs text-theme-muted block mb-1">Temp (°C)</label>
                           <div className="relative">
@@ -1376,18 +1375,18 @@ export function GoodsReceiptScreen({ onBack, onNavigate }: GoodsReceiptScreenPro
 
         {/* Summary before submit */}
         {(scannedPages.length > 0 || proteinLabels.length > 0) && (
-          <div className="bg-theme-ghost rounded-xl p-4 flex items-center gap-4 text-sm">
+          <div className="bg-emerald-500/10 rounded-xl p-4 flex items-center gap-4 text-sm border border-emerald-500/30">
             <div className="flex items-center gap-2">
               <FileText className="w-4 h-4 text-cyan-500" />
-              <span className="text-theme-muted">{scannedPages.length} delivery note page(s)</span>
+              <span className="text-theme-primary font-medium">{scannedPages.length} delivery note page(s)</span>
             </div>
             <div className="flex items-center gap-2">
               <Tag className="w-4 h-4 text-rose-500" />
-              <span className="text-theme-muted">{proteinLabels.length} protein label(s)</span>
+              <span className="text-theme-primary font-medium">{proteinLabels.length} protein label(s)</span>
             </div>
             <div className="flex items-center gap-2">
               <Package className="w-4 h-4 text-emerald-500" />
-              <span className="text-theme-muted">{receipt.items.length} item(s)</span>
+              <span className="text-theme-primary font-medium">{receipt.items.length} item(s)</span>
             </div>
           </div>
         )}

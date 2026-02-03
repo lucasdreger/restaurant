@@ -15,6 +15,8 @@ import {
   BarChart3,
   Loader2,
   ArrowLeft,
+  RefreshCw,
+  Image as ImageIcon,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useQuery } from '@tanstack/react-query'
@@ -44,6 +46,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/Select'
+import { Switch } from '@/components/ui/Switch'
 import { GlassCard } from '@/components/ui/GlassCard'
 import { Separator } from '@/components/ui/Separator'
 import {
@@ -71,10 +74,10 @@ const DEFAULT_FILTERS: FilterState = {
 }
 
 const STATUS_MAP: Record<ReceiptStatus, { icon: React.ReactNode; color: string; label: string }> = {
-  completed: { icon: <CheckCircle className="h-4 w-4" />, color: 'bg-emerald-500/10 text-emerald-600', label: 'Concluído' },
-  draft: { icon: <Zap className="h-4 w-4" />, color: 'bg-yellow-500/10 text-yellow-600', label: 'Rascunho' },
-  flagged: { icon: <AlertTriangle className="h-4 w-4" />, color: 'bg-red-500/10 text-red-600', label: 'Sinalizado' },
-  voided: { icon: <XCircle className="h-4 w-4" />, color: 'bg-gray-500/10 text-gray-600', label: 'Anulado' },
+  completed: { icon: <CheckCircle className="h-4 w-4" />, color: 'bg-emerald-500/10 text-emerald-600', label: 'Completed' },
+  draft: { icon: <Zap className="h-4 w-4" />, color: 'bg-yellow-500/10 text-yellow-600', label: 'Draft' },
+  flagged: { icon: <AlertTriangle className="h-4 w-4" />, color: 'bg-red-500/10 text-red-600', label: 'Flagged' },
+  voided: { icon: <XCircle className="h-4 w-4" />, color: 'bg-gray-500/10 text-gray-600', label: 'Voided' },
 }
 
 // --- Components ---
@@ -88,7 +91,7 @@ function ReceiptCard({ receipt, onClick }: ReceiptCardProps) {
   const status = STATUS_MAP[receipt.status as ReceiptStatus] || STATUS_MAP.completed
   
   const createdAtDate = useMemo(() => {
-    return new Date(receipt.createdAt).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })
+    return new Date(receipt.createdAt).toLocaleString('en-IE', { dateStyle: 'short', timeStyle: 'short' })
   }, [receipt.createdAt])
 
   return (
@@ -107,8 +110,8 @@ function ReceiptCard({ receipt, onClick }: ReceiptCardProps) {
             {receipt.supplierName}
           </h3>
           <p className="text-sm text-theme-muted">
-            {receipt.invoiceNumber && `NF: ${receipt.invoiceNumber} | `}
-            Recebido por <strong>{receipt.receivedByName}</strong>
+            {receipt.invoiceNumber && `Invoice: ${receipt.invoiceNumber} | `}
+            Received by <strong>{receipt.receivedByName}</strong>
           </p>
         </div>
         <div className="text-right">
@@ -139,20 +142,20 @@ function ImageGrid({ images }: ImageGridProps) {
   }
 
   const ImageTypeLabel: Record<DeliveryImage['imageType'], string> = {
-    delivery_note: 'Nota Fiscal / Romaneio',
-    protein_label: 'Rótulo de Rastreabilidade',
-    temperature_log: 'Registro de Temperatura',
-    other: 'Outros',
+    delivery_note: 'Delivery Note / Invoice',
+    protein_label: 'Traceability Label',
+    temperature_log: 'Temperature Log',
+    other: 'Other',
   }
 
   return (
     <div className="mt-4">
       <h4 className="flex items-center gap-2 text-md font-semibold text-theme-primary mb-3">
         <ShieldCheck className="w-5 h-5 text-theme-muted" />
-        Documentação (Audit-Safe)
+        Documentation (Audit-Safe)
       </h4>
       {images.length === 0 ? (
-        <p className="text-sm text-theme-muted italic">Nenhuma imagem registrada para esta entrega.</p>
+        <p className="text-sm text-theme-muted italic">No images registered for this delivery.</p>
       ) : (
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
           {images.map(image => (
@@ -169,7 +172,7 @@ function ImageGrid({ images }: ImageGridProps) {
               />
               <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/20 to-transparent flex items-end p-2">
                 <p className="text-xs font-medium text-white">
-                  {ImageTypeLabel[image.imageType]} {image.pageNumber > 1 ? `(Pág ${image.pageNumber})` : ''}
+                  {ImageTypeLabel[image.imageType]} {image.pageNumber > 1 ? `(Pg ${image.pageNumber})` : ''}
                 </p>
               </div>
             </div>
@@ -187,7 +190,7 @@ function ImageGrid({ images }: ImageGridProps) {
                   {ImageTypeLabel[selectedImage.imageType]}
                 </DialogTitle>
                 <div className="text-sm text-theme-muted">
-                    Salvo em: {new Date(selectedImage.createdAt).toLocaleString('pt-BR', { dateStyle: 'medium', timeStyle: 'short' })}
+                    Saved on: {new Date(selectedImage.createdAt).toLocaleString('en-IE', { dateStyle: 'medium', timeStyle: 'short' })}
                 </div>
               </DialogHeader>
               <ScrollArea className="flex-1 p-4">
@@ -200,26 +203,26 @@ function ImageGrid({ images }: ImageGridProps) {
                 </div>
                 {selectedImage.imageType === 'protein_label' && (
                   <Card className="mt-4 p-4 border border-theme-border">
-                    <h5 className="font-semibold text-theme-primary mb-2">Dados de Rastreabilidade</h5>
+                    <h5 className="font-semibold text-theme-primary mb-2">Traceability Data</h5>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
-                      <p><strong>Produto:</strong> {selectedImage.productName || 'N/A'}</p>
-                      <p><strong>Cód. Fornecedor:</strong> {selectedImage.supplierCode || 'N/A'}</p>
-                      <p><strong>Lote/Batch:</strong> {selectedImage.batchNumber || 'N/A'}</p>
-                      <p><strong>Usar Até:</strong> {selectedImage.useByDate || 'N/A'}</p>
-                      <p><strong>Descrição:</strong> {selectedImage.description || 'N/A'}</p>
+                      <p><strong>Product:</strong> {selectedImage.productName || 'N/A'}</p>
+                      <p><strong>Supplier Code:</strong> {selectedImage.supplierCode || 'N/A'}</p>
+                      <p><strong>Batch/Lot:</strong> {selectedImage.batchNumber || 'N/A'}</p>
+                      <p><strong>Use By:</strong> {selectedImage.useByDate || 'N/A'}</p>
+                      <p><strong>Description:</strong> {selectedImage.description || 'N/A'}</p>
                     </div>
                   </Card>
                 )}
                 {selectedImage.ocrText && (
                   <Card className="mt-4 p-4 border border-theme-border">
-                    <h5 className="font-semibold text-theme-primary mb-2">Texto Extraído (OCR)</h5>
+                    <h5 className="font-semibold text-theme-primary mb-2">Extracted Text (OCR)</h5>
                     <p className="text-sm whitespace-pre-wrap font-mono text-theme-muted/80">{selectedImage.ocrText}</p>
                   </Card>
                 )}
               </ScrollArea>
               <div className="p-4 border-t border-theme-border flex justify-end">
                 <Button variant="outline" onClick={() => setSelectedImage(null)}>
-                    Fechar
+                    Close
                 </Button>
               </div>
             </>
@@ -237,6 +240,7 @@ interface ReceiptDetailModalProps {
 
 function ReceiptDetailModal({ receipt, onClose }: ReceiptDetailModalProps) {
   const [images, setImages] = useState<DeliveryImage[]>([])
+  const { currentSite } = useAppStore()
   
   const { data: details, isLoading: isLoadingDetails } = useQuery({
     queryKey: ['receiptDetails', receipt?.id],
@@ -262,20 +266,20 @@ function ReceiptDetailModal({ receipt, onClose }: ReceiptDetailModalProps) {
     if (!details) return
     
     try {
-      toast.loading('Gerando PDF do recebimento...')
+      toast.loading('Generating receipt PDF...')
       const blob = await generateGoodsReceiptReport(
         [{ ...receipt, items: items as any[], images }],
         {
-          siteName: 'Estabelecimento',
-          generatedBy: 'Sistema ChefVoice',
+          siteName: currentSite?.name || 'Establishment',
+          generatedBy: 'ChefVoice System',
         }
       )
-      downloadPdfReport(blob, `recebimento_${receipt.supplierName}_${new Date(receipt.createdAt).toISOString().split('T')[0]}.pdf`)
+      downloadPdfReport(blob, `receipt_${receipt.supplierName}_${new Date(receipt.createdAt).toISOString().split('T')[0]}.pdf`)
       toast.dismiss()
-      toast.success('PDF gerado com sucesso!')
+      toast.success('PDF generated successfully!')
     } catch (error) {
       toast.dismiss()
-      toast.error('Erro ao gerar PDF')
+      toast.error('Error generating PDF')
       console.error(error)
     }
   }
@@ -286,16 +290,16 @@ function ReceiptDetailModal({ receipt, onClose }: ReceiptDetailModalProps) {
         <DialogHeader className="p-6 border-b border-theme-border">
           <DialogTitle className="text-2xl font-bold flex items-center gap-3">
             <Package className="h-6 w-6 text-theme-primary" />
-            Detalhes do Recebimento: {receipt.supplierName}
+            Receipt Details: {receipt.supplierName}
           </DialogTitle>
           <div className="text-sm text-theme-muted flex items-center gap-4 flex-wrap">
             <span className="flex items-center gap-1">
               <Calendar className="h-4 w-4" />
-              {new Date(receipt.receivedAt).toLocaleString('pt-BR', { dateStyle: 'full', timeStyle: 'short' })}
+              {new Date(receipt.receivedAt).toLocaleString('en-IE', { dateStyle: 'full', timeStyle: 'short' })}
             </span>
             <span className="flex items-center gap-1">
               <User className="h-4 w-4" />
-              Recebido por: {receipt.receivedByName}
+              Received by: {receipt.receivedByName}
             </span>
             <Badge className={cn('w-fit font-medium border', STATUS_MAP[receipt.status as ReceiptStatus].color)}>
                 {STATUS_MAP[receipt.status as ReceiptStatus].label}
@@ -306,18 +310,18 @@ function ReceiptDetailModal({ receipt, onClose }: ReceiptDetailModalProps) {
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             {/* Left Column: Summary */}
             <div className="lg:col-span-1">
-              <h3 className="text-xl font-semibold mb-3 text-theme-primary">Sumário da Entrega</h3>
-              <div className="audo-safe-fields space-y-3 p-4 bg-theme-secondary rounded-lg border border-theme-border">
-                <p className="text-sm"><strong>ID do Recebimento:</strong> {receipt.id}</p>
-                <p className="text-sm"><strong>Criado em:</strong> {new Date(receipt.createdAt).toLocaleString('pt-BR', { dateStyle: 'medium', timeStyle: 'long' })}</p>
-                <p className="text-sm"><strong>Fornecedor:</strong> {receipt.supplierName}</p>
-                <p className="text-sm"><strong>NF/Romaneio:</strong> {receipt.invoiceNumber || 'N/A'}</p>
-                <p className="text-sm"><strong>Data da NF:</strong> {receipt.invoiceDate || 'N/A'}</p>
-                <p className="text-sm"><strong>Temperatura Média:</strong> {receipt.overallTemperature?.toFixed(1) ?? 'N/A'}°C</p>
-                <p className="text-sm"><strong>Status de Conformidade:</strong> {receipt.temperatureCompliant ? 'Conforme' : 'Não Conforme'} </p>
-                <Separator />
-                <p className="text-sm whitespace-pre-wrap"><strong>Notas:</strong> {receipt.notes || 'N/A'}</p>
-                <p className="text-xs text-theme-muted mt-4">Os campos auditáveis (ID, Criado em, Recebido por) são imutáveis após o status 'completed'.</p>
+              <h3 className="text-xl font-semibold mb-3 text-theme-primary">Delivery Summary</h3>
+              <div className="audo-safe-fields space-y-3 p-4 bg-emerald-500/10 rounded-lg border border-emerald-500/30">
+                <p className="text-sm text-theme-primary"><strong>Receipt ID:</strong> {receipt.id}</p>
+                <p className="text-sm text-theme-primary"><strong>Created on:</strong> {new Date(receipt.createdAt).toLocaleString('en-IE', { dateStyle: 'medium', timeStyle: 'long' })}</p>
+                <p className="text-sm text-theme-primary"><strong>Supplier:</strong> {receipt.supplierName}</p>
+                <p className="text-sm text-theme-primary"><strong>Invoice/Delivery Note:</strong> {receipt.invoiceNumber || 'N/A'}</p>
+                <p className="text-sm text-theme-primary"><strong>Invoice Date:</strong> {receipt.invoiceDate || 'N/A'}</p>
+                <p className="text-sm text-theme-primary"><strong>Average Temperature:</strong> {receipt.overallTemperature?.toFixed(1) ?? 'N/A'}°C</p>
+                <p className="text-sm text-theme-primary"><strong>Compliance Status:</strong> {receipt.temperatureCompliant ? 'Compliant' : 'Non-Compliant'} </p>
+                <Separator className="bg-emerald-500/30" />
+                <p className="text-sm whitespace-pre-wrap text-theme-primary"><strong>Notes:</strong> {receipt.notes || 'N/A'}</p>
+                <p className="text-xs text-theme-muted mt-4">Auditable fields (ID, Created on, Received by) are immutable after status 'completed'.</p>
               </div>
               
               <ImageGrid images={images} />
@@ -325,12 +329,12 @@ function ReceiptDetailModal({ receipt, onClose }: ReceiptDetailModalProps) {
 
             {/* Right Column: Items and OCR */}
             <div className="lg:col-span-2">
-              <h3 className="text-xl font-semibold mb-3 text-theme-primary">Itens Recebidos</h3>
+              <h3 className="text-xl font-semibold mb-3 text-theme-primary">Received Items</h3>
               <div className="space-y-4">
                 {isLoadingDetails ? (
-                  <p className="text-theme-muted">Carregando detalhes dos itens...</p>
+                  <p className="text-theme-muted">Loading item details...</p>
                 ) : items.length === 0 ? (
-                  <p className="text-theme-muted italic">Nenhum item registrado para esta entrega.</p>
+                  <p className="text-theme-muted italic">No items registered for this delivery.</p>
                 ) : (
                   items.map((item, index) => (
                     <Card key={(item as any).id || index} className="p-4 flex justify-between items-center">
@@ -343,7 +347,7 @@ function ReceiptDetailModal({ receipt, onClose }: ReceiptDetailModalProps) {
                             'mt-1 w-fit',
                             (item as any).temperature_compliant ? STATUS_MAP.completed.color : STATUS_MAP.flagged.color
                         )}>
-                            {(item as any).temperature_compliant ? 'Temp. OK' : 'Temp. Problema'}
+                            {(item as any).temperature_compliant ? 'Temp. OK' : 'Temp. Issue'}
                         </Badge>
                       </div>
                       <div className="text-sm text-right">
@@ -356,10 +360,10 @@ function ReceiptDetailModal({ receipt, onClose }: ReceiptDetailModalProps) {
 
               {receipt.ocrRawText && (
                 <div className="mt-6">
-                  <h3 className="text-xl font-semibold mb-3 text-theme-primary">Dados de OCR (Texto Bruto)</h3>
+                  <h3 className="text-xl font-semibold mb-3 text-theme-primary">OCR Data (Raw Text)</h3>
                   <Card className="p-4 bg-theme-secondary border border-theme-border">
                     <p className="text-sm whitespace-pre-wrap font-mono text-theme-muted/80">{receipt.ocrRawText}</p>
-                    <p className="text-xs text-right text-theme-muted mt-2">Confiança: {receipt.ocrConfidence?.toFixed(2) ?? 'N/A'}</p>
+                    <p className="text-xs text-right text-theme-muted mt-2">Confidence: {receipt.ocrConfidence?.toFixed(2) ?? 'N/A'}</p>
                   </Card>
                 </div>
               )}
@@ -369,10 +373,10 @@ function ReceiptDetailModal({ receipt, onClose }: ReceiptDetailModalProps) {
         <div className="p-4 border-t border-theme-border flex justify-between">
           <Button variant="outline" className="flex items-center gap-2" onClick={handleDownloadSinglePdf}>
             <Download className="h-4 w-4" />
-            Baixar PDF
+            Download PDF
           </Button>
           <Button onClick={onClose}>
-            Fechar Detalhes
+            Close Details
           </Button>
         </div>
       </DialogContent>
@@ -393,15 +397,16 @@ function ReportDialog({ isOpen, onClose, receipts, filters }: ReportDialogProps)
   const { currentSite } = useAppStore()
   const [isGenerating, setIsGenerating] = useState(false)
   const [reportType, setReportType] = useState<'detailed' | 'summary'>('detailed')
+  const [includeImages, setIncludeImages] = useState(false)
 
   const handleGenerateReport = async () => {
     if (receipts.length === 0) {
-      toast.error('Nenhum recebimento para gerar relatório')
+      toast.error('No receipts to generate report')
       return
     }
 
     setIsGenerating(true)
-    toast.loading('Gerando relatório PDF...')
+            toast.loading('Generating PDF report...')
 
     try {
       // Fetch full details for all receipts if generating detailed report
@@ -420,7 +425,7 @@ function ReportDialog({ isOpen, onClose, receipts, filters }: ReportDialogProps)
       }
 
       const options = {
-        siteName: currentSite?.name || 'Estabelecimento',
+        siteName: currentSite?.name || 'Establishment',
         siteAddress: currentSite?.address,
         generatedBy: 'ChefVoice Kitchen Compliance',
         filters: {
@@ -429,6 +434,7 @@ function ReportDialog({ isOpen, onClose, receipts, filters }: ReportDialogProps)
           startDate: filters.startDate || undefined,
           endDate: filters.endDate || undefined,
         },
+        includeImages: reportType === 'detailed' && includeImages,
       }
 
       let blob: Blob
@@ -438,15 +444,15 @@ function ReportDialog({ isOpen, onClose, receipts, filters }: ReportDialogProps)
         blob = await generateGoodsReceiptReport(receiptsWithDetails as any, options)
       }
 
-      const filename = `relatorio_recebimentos_${new Date().toISOString().split('T')[0]}.pdf`
+      const filename = `goods_receipt_report_${new Date().toISOString().split('T')[0]}.pdf`
       downloadPdfReport(blob, filename)
 
       toast.dismiss()
-      toast.success('Relatório gerado com sucesso!')
+      toast.success('Report generated successfully!')
       onClose()
     } catch (error) {
       toast.dismiss()
-      toast.error('Erro ao gerar relatório')
+      toast.error('Error generating report')
       console.error(error)
     } finally {
       setIsGenerating(false)
@@ -459,14 +465,14 @@ function ReportDialog({ isOpen, onClose, receipts, filters }: ReportDialogProps)
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <FileText className="h-5 w-5" />
-            Gerar Relatório PDF
+            Generate PDF Report
           </DialogTitle>
         </DialogHeader>
         
         <div className="space-y-6 py-4">
           {/* Report Type Selection */}
           <div className="space-y-3">
-            <label className="text-sm font-medium text-theme-primary">Tipo de Relatório</label>
+            <label className="text-sm font-medium text-theme-primary">Report Type</label>
             <div className="grid grid-cols-2 gap-3">
               <button
                 onClick={() => setReportType('detailed')}
@@ -474,13 +480,13 @@ function ReportDialog({ isOpen, onClose, receipts, filters }: ReportDialogProps)
                   'p-4 rounded-lg border-2 text-left transition-all',
                   reportType === 'detailed'
                     ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-900/20'
-                    : 'border-zinc-200 dark:border-zinc-700 hover:border-zinc-300'
+                    : 'border-zinc-200 dark:border-zinc-700 hover:border-zinc-300 bg-white dark:bg-zinc-800'
                 )}
               >
                 <FileText className="h-6 w-6 mb-2 text-emerald-600" />
-                <p className="font-medium text-sm">Detalhado</p>
-                <p className="text-xs text-theme-muted mt-1">
-                  Todos os detalhes, itens e imagens de cada recebimento
+                <p className="font-medium text-sm text-zinc-900 dark:text-zinc-100">Detailed</p>
+                <p className="text-xs text-zinc-600 dark:text-zinc-400 mt-1">
+                  All details, items and images from each receipt
                 </p>
               </button>
               
@@ -490,27 +496,48 @@ function ReportDialog({ isOpen, onClose, receipts, filters }: ReportDialogProps)
                   'p-4 rounded-lg border-2 text-left transition-all',
                   reportType === 'summary'
                     ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-900/20'
-                    : 'border-zinc-200 dark:border-zinc-700 hover:border-zinc-300'
+                    : 'border-zinc-200 dark:border-zinc-700 hover:border-zinc-300 bg-white dark:bg-zinc-800'
                 )}
               >
                 <BarChart3 className="h-6 w-6 mb-2 text-emerald-600" />
-                <p className="font-medium text-sm">Resumido</p>
-                <p className="text-xs text-theme-muted mt-1">
-                  Visão geral em uma página com estatísticas
+                <p className="font-medium text-sm text-zinc-900 dark:text-zinc-100">Summary</p>
+                <p className="text-xs text-zinc-600 dark:text-zinc-400 mt-1">
+                  One-page overview with statistics
                 </p>
               </button>
             </div>
           </div>
 
+          {/* Include Images Toggle (only for detailed) */}
+          {reportType === 'detailed' && (
+            <div className="flex items-center justify-between p-4 bg-emerald-50 dark:bg-emerald-900/20 rounded-lg border border-emerald-200 dark:border-emerald-800">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-emerald-100 dark:bg-emerald-800 rounded-lg">
+                  <ImageIcon className="h-5 w-5 text-emerald-600" />
+                </div>
+                <div>
+                  <p className="font-medium text-sm text-theme-primary">Include Images in PDF</p>
+                  <p className="text-xs text-theme-muted">
+                    Embed delivery note and protein label photos
+                  </p>
+                </div>
+              </div>
+              <Switch
+                checked={includeImages}
+                onCheckedChange={setIncludeImages}
+              />
+            </div>
+          )}
+
           {/* Receipt Count Info */}
           <div className="p-4 bg-theme-secondary rounded-lg">
             <div className="flex items-center justify-between">
-              <span className="text-sm text-theme-muted">Recebimentos incluídos:</span>
+              <span className="text-sm text-theme-muted">Receipts included:</span>
               <span className="font-semibold text-theme-primary">{receipts.length}</span>
             </div>
             {filters.status !== 'all' && (
               <div className="flex items-center justify-between mt-2">
-                <span className="text-sm text-theme-muted">Status filtrado:</span>
+                <span className="text-sm text-theme-muted">Filtered status:</span>
                 <span className="font-medium text-theme-primary">
                   {STATUS_MAP[filters.status as ReceiptStatus]?.label || filters.status}
                 </span>
@@ -518,7 +545,7 @@ function ReportDialog({ isOpen, onClose, receipts, filters }: ReportDialogProps)
             )}
             {filters.search && (
               <div className="flex items-center justify-between mt-2">
-                <span className="text-sm text-theme-muted">Busca:</span>
+                <span className="text-sm text-theme-muted">Search:</span>
                 <span className="font-medium text-theme-primary">"{filters.search}"</span>
               </div>
             )}
@@ -528,26 +555,26 @@ function ReportDialog({ isOpen, onClose, receipts, filters }: ReportDialogProps)
           <div className="flex items-start gap-2 text-sm text-theme-muted">
             <ShieldCheck className="h-4 w-4 mt-0.5 flex-shrink-0" />
             <p>
-              O relatório inclui todos os dados auditáveis e pode ser usado para conformidade HACCP.
-              As imagens são referenciadas no relatório detalhado.
+              The report includes all auditable data and can be used for HACCP compliance.
+              Images are referenced in the detailed report.
             </p>
           </div>
         </div>
 
         <div className="flex justify-end gap-3">
           <Button variant="outline" onClick={onClose} disabled={isGenerating}>
-            Cancelar
+            Cancel
           </Button>
           <Button onClick={handleGenerateReport} disabled={isGenerating || receipts.length === 0}>
             {isGenerating ? (
               <>
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                Gerando...
+                Generating...
               </>
             ) : (
               <>
                 <Download className="h-4 w-4 mr-2" />
-                Gerar PDF
+                Generate PDF
               </>
             )}
           </Button>
@@ -577,7 +604,7 @@ export function ReceiptHistoryScreen({ onBack, onNavigate }: ReceiptHistoryScree
     setPage(0)
   }
 
-  const { data, isLoading, isFetching } = useQuery({
+  const { data, isLoading, isFetching, refetch } = useQuery({
     queryKey: ['listGoodsReceipts', currentSite?.id, filters, page],
     queryFn: () => {
       if (!currentSite?.id) return { receipts: [], total: 0 }
@@ -629,16 +656,20 @@ export function ReceiptHistoryScreen({ onBack, onNavigate }: ReceiptHistoryScree
           )}
           <h1 className="text-3xl font-bold text-theme-primary flex items-center gap-3">
             <ListFilter className="w-7 h-7" />
-            Histórico de Recebimentos
+            Receipt History
           </h1>
         </div>
         <div className="flex gap-2">
+          <Button variant="outline" onClick={() => refetch()} className="flex items-center gap-2">
+            <RefreshCw className="h-4 w-4" />
+            Refresh
+          </Button>
           <Button variant="outline" onClick={() => setIsReportDialogOpen(true)} className="flex items-center gap-2">
             <FileText className="h-4 w-4" />
-            Relatório PDF
+            PDF Report
           </Button>
           <Button onClick={handleNewReceipt}>
-            Novo Recebimento
+            New Receipt
           </Button>
         </div>
       </header>
@@ -647,12 +678,12 @@ export function ReceiptHistoryScreen({ onBack, onNavigate }: ReceiptHistoryScree
         <GlassCard className="p-4 flex flex-wrap gap-4 items-center">
           <h2 className="text-lg font-semibold text-theme-primary flex items-center gap-2">
             <Search className="w-5 h-5" />
-            Filtros
+            Filters
           </h2>
 
           <div className="flex-1 min-w-[200px] relative">
             <Input 
-              placeholder="Buscar Fornecedor, NF, ou Recebedor..."
+              placeholder="Search Supplier, Invoice, or Receiver..."
               value={filters.search}
               onChange={(e) => handleFilterChange('search', e.target.value)}
               className="pl-10"
@@ -669,7 +700,7 @@ export function ReceiptHistoryScreen({ onBack, onNavigate }: ReceiptHistoryScree
                 <SelectValue placeholder="Status" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">Todos os Status</SelectItem>
+                <SelectItem value="all">All Statuses</SelectItem>
                 {Object.keys(STATUS_MAP).map(statusKey => (
                   <SelectItem key={statusKey} value={statusKey}>
                     {STATUS_MAP[statusKey as ReceiptStatus].label}
@@ -683,7 +714,7 @@ export function ReceiptHistoryScreen({ onBack, onNavigate }: ReceiptHistoryScree
             variant="outline"
             onClick={() => setFilters(DEFAULT_FILTERS)}
           >
-            Limpar Filtros
+            Clear Filters
           </Button>
 
         </GlassCard>
@@ -693,13 +724,13 @@ export function ReceiptHistoryScreen({ onBack, onNavigate }: ReceiptHistoryScree
         {isLoading || isFetching ? (
           <div className="flex items-center justify-center py-12">
             <Loader2 className="h-8 w-8 animate-spin text-emerald-500" />
-            <span className="ml-3 text-theme-muted">Carregando histórico...</span>
+            <span className="ml-3 text-theme-muted">Loading history...</span>
           </div>
         ) : filteredReceipts.length === 0 ? (
           <div className="text-center py-12">
             <Package className="h-12 w-12 text-theme-muted mx-auto mb-4" />
-            <p className="text-theme-muted">Nenhum recebimento encontrado.</p>
-            <p className="text-sm text-theme-muted mt-1">Comece a registrar novas entregas!</p>
+            <p className="text-theme-muted">No receipts found.</p>
+            <p className="text-sm text-theme-muted mt-1">Start registering new deliveries!</p>
           </div>
         ) : (
           filteredReceipts.map(receipt => (
@@ -712,7 +743,7 @@ export function ReceiptHistoryScreen({ onBack, onNavigate }: ReceiptHistoryScree
       {filteredReceipts.length > 0 && (
         <div className="flex justify-between items-center mt-6">
           <p className="text-sm text-theme-muted">
-            Mostrando {filteredReceipts.length} de {totalCount} registros.
+            Showing {filteredReceipts.length} de {totalCount} records.
           </p>
           <div className="flex items-center gap-2">
             <Button
@@ -721,10 +752,10 @@ export function ReceiptHistoryScreen({ onBack, onNavigate }: ReceiptHistoryScree
               onClick={() => setPage(prev => Math.max(0, prev - 1))}
               disabled={page === 0 || isLoading || isFetching}
             >
-              Anterior
+              Previous
             </Button>
             <span className="text-sm font-medium text-theme-primary">
-              Página {page + 1} de {totalPages || 1}
+              Page {page + 1} de {totalPages || 1}
             </span>
             <Button
               variant="outline"
@@ -732,7 +763,7 @@ export function ReceiptHistoryScreen({ onBack, onNavigate }: ReceiptHistoryScree
               onClick={() => setPage(prev => prev + 1)}
               disabled={page >= totalPages - 1 || isLoading || isFetching || totalCount === 0}
             >
-              Próxima
+              Next
             </Button>
           </div>
         </div>

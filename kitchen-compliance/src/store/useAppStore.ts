@@ -20,10 +20,9 @@ export type OCRModel =
   | 'anthropic/claude-haiku'           // Claude 3 Haiku via OpenRouter (fast/cheap)
   | 'google/gemini-2.0-flash'          // Gemini 2.0 Flash via OpenRouter
   | 'google/gemini-flash-1.5'          // Gemini 1.5 Flash via OpenRouter
-  | 'tesseract'                        // Free local Tesseract.js
 
 // OCR provider type
-export type OCRProvider = 'openai' | 'openrouter' | 'tesseract'
+export type OCRProvider = 'openai' | 'openrouter'
 
 // Available wake word options
 export const WAKE_WORD_OPTIONS = [
@@ -59,8 +58,8 @@ const defaultSettings: AppSettings = {
   openrouterApiKey: null,
   voiceProvider: 'browser',
   audioModel: 'openai/gpt-audio-mini', // Default to reliable chat-audio model for better streaming support
-  ocrProvider: 'tesseract', // Default to free local OCR
-  ocrModel: 'tesseract', // Default to Tesseract
+  ocrProvider: 'openrouter', // Default to OpenRouter (Gemini is cheap and fast)
+  ocrModel: 'google/gemini-2.0-flash', // Default to Gemini 2.0 Flash
   apiProvider: 'openai',
   language: 'en',
   theme: 'day',

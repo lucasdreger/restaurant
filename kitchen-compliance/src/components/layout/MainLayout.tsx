@@ -1,5 +1,5 @@
-import type { ReactNode } from 'react'
-import { Sidebar, MobileNav } from './Sidebar'
+import { type ReactNode, useState } from 'react'
+import { Sidebar, MobileNav, MobileHeader, MobileMenuDrawer } from './Sidebar'
 import { useAppStore } from '@/store/useAppStore'
 
 interface MainLayoutProps {
@@ -25,6 +25,7 @@ export function MainLayout({
   fullScreen = false 
 }: MainLayoutProps) {
   const { currentSite } = useAppStore()
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
 
   // Full screen mode - no sidebar at all (e.g., for onboarding, landing)
   if (fullScreen) {
@@ -46,14 +47,29 @@ export function MainLayout({
 
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-h-screen lg:ml-0">
+        {/* Mobile Header with hamburger menu */}
+        <MobileHeader
+          currentScreen={currentScreen}
+          onMenuClick={() => setMobileMenuOpen(true)}
+        />
+
         {/* Content */}
-        <main className="flex-1 overflow-auto">
+        <main className="flex-1 overflow-auto pt-16 lg:pt-0">
           {children}
         </main>
       </div>
 
       {/* Mobile Navigation - Only visible on mobile/tablet */}
       <MobileNav currentScreen={currentScreen} onNavigate={onNavigate} />
+
+      {/* Mobile Menu Drawer - Full navigation menu */}
+      <MobileMenuDrawer
+        isOpen={mobileMenuOpen}
+        onClose={() => setMobileMenuOpen(false)}
+        currentScreen={currentScreen}
+        onNavigate={onNavigate}
+        siteName={currentSite?.name || 'Kitchen Ops'}
+      />
     </div>
   )
 }

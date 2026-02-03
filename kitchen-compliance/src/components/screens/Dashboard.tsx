@@ -25,6 +25,7 @@ export function Dashboard({ onNavigate, currentScreen = 'home' }: DashboardProps
   const [isStartModalOpen, setIsStartModalOpen] = useState(false)
   const [closeModalSessionId, setCloseModalSessionId] = useState<string | null>(null)
   const [isFridgeTempModalOpen, setIsFridgeTempModalOpen] = useState(false)
+  const [preselectedFridgeIndex, setPreselectedFridgeIndex] = useState<number | undefined>(undefined)
 
   const [wakeWordTriggered, setWakeWordTriggered] = useState(false)
 
@@ -146,8 +147,21 @@ export function Dashboard({ onNavigate, currentScreen = 'home' }: DashboardProps
           }
           break
         case 'log_fridge_temp':
+          // Handle fridge number if specified (e.g., "log fridge 1")
+          if (command.fridgeNumber) {
+            const fridgeIndex = parseInt(command.fridgeNumber, 10) - 1 // Convert to 0-based index
+            if (fridgeIndex >= 0) {
+              setPreselectedFridgeIndex(fridgeIndex)
+              speak(`Opening fridge ${command.fridgeNumber} temperature logger`)
+            } else {
+              setPreselectedFridgeIndex(undefined)
+              speak('Opening fridge temperature logger')
+            }
+          } else {
+            setPreselectedFridgeIndex(undefined)
+            speak('Opening fridge temperature logger')
+          }
           setIsFridgeTempModalOpen(true)
-          speak('Opening fridge temperature logger')
           break
       }
 
@@ -498,6 +512,7 @@ export function Dashboard({ onNavigate, currentScreen = 'home' }: DashboardProps
       <FridgeTempModal
         isOpen={isFridgeTempModalOpen}
         onClose={() => setIsFridgeTempModalOpen(false)}
+        preselectedFridgeIndex={preselectedFridgeIndex}
       />
     </div>
   )

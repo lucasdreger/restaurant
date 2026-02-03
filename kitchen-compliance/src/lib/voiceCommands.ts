@@ -60,15 +60,39 @@ export function parseVoiceCommand(transcript: string): VoiceCommand {
   }
 
   // Fridge temperature commands
+  // Support: "log fridge 1", "log fridge", "fridge temperature", etc.
   const fridgePatterns = [
+    // "log fridge 1", "record fridge 2", "check fridge 3"
+    /^(log|record|check)\s+(?:fridge|refrigerator|freezer)\s+(\d+|one|two|three|four|five|six|seven|eight|nine|ten)/i,
+    // "fridge 1 temperature", "fridge 2 temp"
+    /^(?:fridge|refrigerator|freezer)\s+(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+(?:temp|temperature)/i,
+    // Generic patterns without number
     /^(log|record|check)\s+(fridge|refrigerator|freezer)\s+(temp|temperature)/i,
     /^(fridge|refrigerator|freezer)\s+(temp|temperature)/i,
     /^(temp|temperature)\s+(fridge|refrigerator|freezer)/i,
   ]
 
   for (const pattern of fridgePatterns) {
-    if (pattern.test(lower)) {
-      return { type: 'log_fridge_temp' }
+    const match = lower.match(pattern)
+    if (match) {
+      // Check if a fridge number was specified
+      const numberWords: Record<string, string> = {
+        'one': '1', 'two': '2', 'three': '3', 'four': '4', 'five': '5',
+        'six': '6', 'seven': '7', 'eight': '8', 'nine': '9', 'ten': '10'
+      }
+      
+      let fridgeNumber: string | undefined
+      if (match[1] && /^\d+$/.test(match[1])) {
+        fridgeNumber = match[1]
+      } else if (match[1] && numberWords[match[1]]) {
+        fridgeNumber = numberWords[match[1]]
+      } else if (match[2] && /^\d+$/.test(match[2])) {
+        fridgeNumber = match[2]
+      } else if (match[2] && numberWords[match[2]]) {
+        fridgeNumber = numberWords[match[2]]
+      }
+      
+      return { type: 'log_fridge_temp', fridgeNumber }
     }
   }
 
