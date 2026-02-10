@@ -32,7 +32,7 @@ export const supabase = supabaseClient as SupabaseClient<Database>
 export const getSupabaseClient = () => supabaseClient
 
 // Demo site/venue ID (created in database - must match migration)
-export const DEMO_SITE_ID = 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11'
+export const DEMO_SITE_ID = 'b0eebc99-9c0b-4ef8-bb6d-6bb9bd380a12'
 
 // Re-export database types
 export type { Database }

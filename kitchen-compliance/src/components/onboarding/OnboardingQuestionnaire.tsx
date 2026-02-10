@@ -15,7 +15,7 @@ type OnboardingStep = 'restaurant' | 'details' | 'team' | 'complete'
 export function OnboardingQuestionnaire({ userId, userEmail, onComplete }: OnboardingQuestionnaireProps) {
   const [step, setStep] = useState<OnboardingStep>('restaurant')
   const [isSubmitting, setIsSubmitting] = useState(false)
-  
+
   // Form data
   const [formData, setFormData] = useState({
     // Restaurant info
@@ -24,14 +24,14 @@ export function OnboardingQuestionnaire({ userId, userEmail, onComplete }: Onboa
     address: '',
     city: '',
     country: 'Ireland',
-    
+
     // Business details
     seatingCapacity: '',
     avgDailyCovers: '',
     openingDate: '',
     hasMultipleLocations: false,
     numberOfLocations: '1',
-    
+
     // Team info
     numberOfStaff: '',
     hasKitchenManager: true,
@@ -81,7 +81,7 @@ export function OnboardingQuestionnaire({ userId, userEmail, onComplete }: Onboa
   // Handle form submission
   const handleSubmit = async () => {
     setIsSubmitting(true)
-    
+
     try {
       // 1. Create restaurant/venue in Supabase
       const venueData = {
@@ -172,12 +172,12 @@ export function OnboardingQuestionnaire({ userId, userEmail, onComplete }: Onboa
       // 4. Move to complete step
       setStep('complete')
       toast.success('Restaurant setup complete!')
-      
+
       // Auto-complete after 2 seconds
       setTimeout(() => {
         onComplete()
       }, 2000)
-      
+
     } catch (error) {
       console.error('Onboarding error:', error)
       toast.error('Something went wrong. Please try again.')
@@ -213,7 +213,19 @@ export function OnboardingQuestionnaire({ userId, userEmail, onComplete }: Onboa
                 This will only take 2 minutes
               </p>
             </div>
+            <button
+              onClick={async () => {
+                const { supabase } = await import('@/lib/supabase')
+                await supabase.auth.signOut()
+                localStorage.clear()
+                window.location.reload()
+              }}
+              className="ml-auto text-sm text-slate-400 hover:text-white underline decoration-slate-600 hover:decoration-white underline-offset-4 transition-all"
+            >
+              Sign Out
+            </button>
           </div>
+
 
           {/* Progress Steps */}
           <div className="flex items-center gap-2 mt-6">
@@ -221,8 +233,8 @@ export function OnboardingQuestionnaire({ userId, userEmail, onComplete }: Onboa
               <div key={s} className="flex items-center flex-1">
                 <div className={cn(
                   "w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold transition-all",
-                  step === s 
-                    ? "bg-emerald-500 text-white" 
+                  step === s
+                    ? "bg-emerald-500 text-white"
                     : ['restaurant', 'details', 'team'].indexOf(step) > idx || step === 'complete'
                       ? "bg-emerald-500/20 text-emerald-400"
                       : "bg-slate-800 text-slate-500"
@@ -252,7 +264,7 @@ export function OnboardingQuestionnaire({ userId, userEmail, onComplete }: Onboa
           {step === 'restaurant' && (
             <div className="space-y-5 animate-fade-in">
               <h3 className="text-xl font-semibold text-white mb-6">Tell us about your restaurant</h3>
-              
+
               <div>
                 <label className="text-sm text-slate-400 block mb-2">Restaurant Name *</label>
                 <input
@@ -263,7 +275,7 @@ export function OnboardingQuestionnaire({ userId, userEmail, onComplete }: Onboa
                   className="w-full px-4 py-3 bg-slate-800/50 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition-colors"
                 />
               </div>
-              
+
               <div>
                 <label className="text-sm text-slate-400 block mb-2">Business Type</label>
                 <select
@@ -280,7 +292,7 @@ export function OnboardingQuestionnaire({ userId, userEmail, onComplete }: Onboa
                   <option value="other">Other</option>
                 </select>
               </div>
-              
+
               <div>
                 <label className="text-sm text-slate-400 block mb-2">Address *</label>
                 <input
@@ -291,7 +303,7 @@ export function OnboardingQuestionnaire({ userId, userEmail, onComplete }: Onboa
                   className="w-full px-4 py-3 bg-slate-800/50 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition-colors"
                 />
               </div>
-              
+
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="text-sm text-slate-400 block mb-2">City *</label>
@@ -326,7 +338,7 @@ export function OnboardingQuestionnaire({ userId, userEmail, onComplete }: Onboa
           {step === 'details' && (
             <div className="space-y-5 animate-fade-in">
               <h3 className="text-xl font-semibold text-white mb-6">Business Details</h3>
-              
+
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="text-sm text-slate-400 block mb-2">Seating Capacity *</label>
@@ -349,7 +361,7 @@ export function OnboardingQuestionnaire({ userId, userEmail, onComplete }: Onboa
                   />
                 </div>
               </div>
-              
+
               <div>
                 <label className="text-sm text-slate-400 block mb-2">Opening Date (optional)</label>
                 <input
@@ -359,7 +371,7 @@ export function OnboardingQuestionnaire({ userId, userEmail, onComplete }: Onboa
                   className="w-full px-4 py-3 bg-slate-800/50 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-emerald-500 transition-colors"
                 />
               </div>
-              
+
               <div>
                 <label className="text-sm text-slate-400 block mb-3">Do you have multiple locations?</label>
                 <div className="flex gap-4">
@@ -389,7 +401,7 @@ export function OnboardingQuestionnaire({ userId, userEmail, onComplete }: Onboa
                   </button>
                 </div>
               </div>
-              
+
               {formData.hasMultipleLocations && (
                 <div>
                   <label className="text-sm text-slate-400 block mb-2">Number of Locations</label>
@@ -410,7 +422,7 @@ export function OnboardingQuestionnaire({ userId, userEmail, onComplete }: Onboa
           {step === 'team' && (
             <div className="space-y-5 animate-fade-in">
               <h3 className="text-xl font-semibold text-white mb-6">Team & Compliance</h3>
-              
+
               <div>
                 <label className="text-sm text-slate-400 block mb-2">Number of Kitchen Staff *</label>
                 <input
@@ -421,7 +433,7 @@ export function OnboardingQuestionnaire({ userId, userEmail, onComplete }: Onboa
                   className="w-full px-4 py-3 bg-slate-800/50 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition-colors"
                 />
               </div>
-              
+
               <div>
                 <label className="text-sm text-slate-400 block mb-3">Do you have a dedicated kitchen manager?</label>
                 <div className="flex gap-4">
@@ -451,7 +463,7 @@ export function OnboardingQuestionnaire({ userId, userEmail, onComplete }: Onboa
                   </button>
                 </div>
               </div>
-              
+
               <div>
                 <label className="text-sm text-slate-400 block mb-2">Current Compliance Method</label>
                 <select
@@ -465,7 +477,7 @@ export function OnboardingQuestionnaire({ userId, userEmail, onComplete }: Onboa
                   <option value="none">No formal system</option>
                 </select>
               </div>
-              
+
               <div>
                 <label className="text-sm text-slate-400 block mb-3">What are your main compliance challenges? * (Select all that apply)</label>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">

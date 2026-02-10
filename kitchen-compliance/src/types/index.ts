@@ -108,14 +108,14 @@ export interface AppState {
   // Current site
   currentSite: Site | null
   setCurrentSite: (site: Site | null) => void
-  
+
   // Staff members
   staffMembers: StaffMember[]
   setStaffMembers: (members: StaffMember[]) => void
   addStaffMember: (member: StaffMember) => void
   updateStaffMember: (id: string, updates: Partial<StaffMember>) => void
   removeStaffMember: (id: string) => void
-  
+
   // Food presets
   foodPresets: FoodItemPreset[]
   setFoodPresets: (presets: FoodItemPreset[]) => void
@@ -123,45 +123,50 @@ export interface AppState {
   updateFoodPreset: (id: string, updates: Partial<FoodItemPreset>) => void
   removeFoodPreset: (id: string) => void
   incrementFoodUsage: (id: string) => void
-  
+
   // Cooling sessions
   coolingSessions: CoolingSession[]
   addCoolingSession: (session: CoolingSession) => void
   updateCoolingSession: (id: string, updates: Partial<CoolingSession>) => void
   removeCoolingSession: (id: string) => void
   setCoolingSessions: (sessions: CoolingSession[]) => void
-  
+
   // Active alerts
   alerts: Alert[]
   addAlert: (alert: Alert) => void
   acknowledgeAlert: (id: string, by?: string) => void
   clearAlerts: () => void
-  
+
   // Offline queue
   offlineQueue: CoolingEvent[]
   addToOfflineQueue: (event: CoolingEvent) => void
   clearOfflineQueue: () => void
-  
+
   // Connection status
   isOnline: boolean
   setIsOnline: (online: boolean) => void
-  
+
   // Voice state
   isListening: boolean
   setIsListening: (listening: boolean) => void
-  
+
   // UI state
   kioskMode: boolean
   setKioskMode: (kiosk: boolean) => void
 }
 
 // Voice command types
-export type VoiceCommand = 
+export type VoiceCommand =
   | { type: 'start_cooling'; item?: string }
   | { type: 'stop_cooling'; sessionId?: string; item?: string }
   | { type: 'discard'; sessionId?: string }
   | { type: 'log_fridge_temp'; fridgeNumber?: string }
+  | { type: 'log_cooking' }
+  | { type: 'log_reheating' }
+  | { type: 'log_hot_hold' }
+  | { type: 'hygiene_inspection' }
   | { type: 'unknown' }
+  | { type: 'noise' }
 
 // Export report data
 export interface CoolingReport {

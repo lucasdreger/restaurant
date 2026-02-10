@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
-import { Snowflake, AlertTriangle, Clock, Check, Trash2, Thermometer, Timer } from 'lucide-react'
+import { Snowflake, AlertTriangle, Check, Trash2, Thermometer } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { CoolingSession } from '@/types'
 
@@ -21,13 +21,13 @@ export function CoolingSensorCard({ session, onClose, onDiscard, referenceNumber
       const now = new Date()
       const started = new Date(session.started_at)
       const hardDue = new Date(session.hard_due_at)
-      
+
       // Elapsed time
       const elapsedMs = now.getTime() - started.getTime()
       const elapsedMins = Math.floor(elapsedMs / (1000 * 60))
       const elapsedHours = Math.floor(elapsedMins / 60)
       const mins = elapsedMins % 60
-      
+
       if (elapsedHours > 0) {
         setElapsedTime(`${elapsedHours}h ${mins}m`)
       } else {
@@ -117,125 +117,99 @@ export function CoolingSensorCard({ session, onClose, onDiscard, referenceNumber
   }
 
   return (
-    <div className={cn('cooling-card', statusConfig.cardClass)}>
-      {/* Header */}
-      <div className="flex items-start justify-between mb-4">
-        <div className="flex items-center gap-3">
+    <div className={cn('cooling-card !p-3', statusConfig.cardClass)}>
+      {/* Header - More compact */}
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-2">
           <div className={cn(
-            'w-14 h-14 rounded-xl flex items-center justify-center text-2xl shadow-lg',
+            'w-10 h-10 rounded-lg flex items-center justify-center text-xl shadow-md shrink-0',
             statusConfig.iconGradient
           )}>
-            <span className="drop-shadow-md">{getCategoryEmoji()}</span>
+            <span className="drop-shadow-sm">{getCategoryEmoji()}</span>
           </div>
-          <div>
-            <div className="flex items-center gap-2">
+          <div className="min-w-0">
+            <div className="flex items-center gap-1.5">
               {referenceNumber !== undefined && (
-                <span className="px-2 py-0.5 rounded-full bg-theme-ghost text-xs font-semibold text-theme-muted">
+                <span className="px-1.5 py-0.5 rounded-full bg-theme-ghost text-[10px] font-bold text-theme-muted">
                   #{referenceNumber}
                 </span>
               )}
-              <h3 className="font-bold text-lg text-theme-primary">
+              <h3 className="font-bold text-base text-theme-primary truncate">
                 {session.item_name}
               </h3>
             </div>
-            <div className="flex items-center gap-2 text-xs text-theme-muted">
-              <Thermometer className="w-3 h-3" />
-              <span>FSAI SC3 Cooling Protocol</span>
+            <div className="flex items-center gap-1.5 text-[10px] text-theme-muted">
+              <Thermometer className="w-2.5 h-2.5" />
+              <span>FSAI SC3 Protocol</span>
             </div>
           </div>
         </div>
-        <span className={cn('status-badge', statusConfig.badgeClass)}>
-          {session.status === 'overdue' && <AlertTriangle className="w-3 h-3" />}
-          {session.status === 'warning' && <Clock className="w-3 h-3" />}
-          {session.status === 'active' && <Snowflake className="w-3 h-3" />}
+        <span className={cn('status-badge text-[10px] py-1 px-2', statusConfig.badgeClass)}>
           {statusConfig.badge}
         </span>
       </div>
 
-      {/* Timer Display - Stunning */}
-      <div className="bg-theme-ghost rounded-xl p-4 mb-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="text-xs text-theme-muted uppercase tracking-wide mb-1">
-              Elapsed Time
-            </p>
-            <span className={cn('text-4xl font-mono font-bold tracking-tight', statusConfig.timerClass)}>
-              {elapsedTime}
-            </span>
-          </div>
-          <div className="text-right">
-            <p className="text-xs text-theme-muted uppercase tracking-wide mb-1">
-              Remaining
-            </p>
-            <span className={cn(
-              'text-2xl font-mono font-bold',
-              session.status === 'overdue' ? 'text-red-500 animate-pulse' : statusConfig.accent
-            )}>
-              {timeRemaining}
-            </span>
-          </div>
+      {/* Timer Display - More integrated */}
+      <div className="bg-theme-ghost/50 rounded-lg p-2.5 mb-3 flex items-center justify-between">
+        <div>
+          <p className="text-[9px] text-theme-muted uppercase font-bold tracking-wider mb-0.5">
+            Elapsed
+          </p>
+          <span className={cn('text-2xl font-mono font-bold tracking-tight', statusConfig.timerClass)}>
+            {elapsedTime}
+          </span>
+        </div>
+        <div className="text-right">
+          <p className="text-[9px] text-theme-muted uppercase font-bold tracking-wider mb-0.5">
+            Remaining
+          </p>
+          <span className={cn(
+            'text-xl font-mono font-bold',
+            session.status === 'overdue' ? 'text-red-500 animate-pulse' : statusConfig.accent
+          )}>
+            {timeRemaining}
+          </span>
         </div>
       </div>
 
-      {/* Progress Bar - Stunning */}
-      <div className="mb-4">
-        <div className="flex justify-between text-xs mb-2">
-          <span className="text-theme-muted font-medium">2-hour limit progress</span>
-          <span className={cn('font-bold', statusConfig.accent)}>
-            {Math.round(progress)}%
-          </span>
-        </div>
-        <div className="h-3 bg-theme-ghost rounded-full overflow-hidden shadow-inner">
-          <div 
+      {/* Progress Bar - Thinner */}
+      <div className="mb-3">
+        <div className="h-1.5 bg-theme-ghost rounded-full overflow-hidden">
+          <div
             className={cn(
-              'h-full rounded-full transition-all duration-700 shadow-lg',
+              'h-full rounded-full transition-all duration-700',
               statusConfig.progressGradient
             )}
             style={{ width: `${Math.min(100, progress)}%` }}
           />
         </div>
-        {/* Milestone markers */}
-        <div className="flex justify-between mt-1 text-[10px] text-theme-muted">
-          <span>Start</span>
-          <span className="text-amber-500 font-medium">90min</span>
-          <span className="text-red-500 font-medium">120min</span>
+        <div className="flex justify-between mt-1 text-[9px] text-theme-muted font-medium">
+          <span>{Math.round(progress)}% limit</span>
+          <div className="flex gap-2">
+            <span className="text-amber-500/80">90m</span>
+            <span className="text-red-500/80 font-bold">120m</span>
+          </div>
         </div>
       </div>
 
-      {/* Info Row */}
-      <div className="flex items-center gap-4 text-xs text-theme-muted mb-4 p-3 bg-theme-ghost/50 rounded-lg">
-        <div className="flex items-center gap-1">
-          <Timer className="w-3 h-3" />
-          <span>Target: &lt;8°C</span>
-        </div>
-        <div className="h-3 w-px bg-theme-primary" />
-        <div className="flex items-center gap-1">
-          <Clock className="w-3 h-3" />
-          <span>Max: 2 hours</span>
-        </div>
-      </div>
-
-      {/* Actions - Stunning */}
-      <div className="flex gap-3">
+      {/* Actions - Dense grid */}
+      <div className="flex gap-2">
         <button
           onClick={() => onClose(session.id)}
           className={cn(
-            'flex-1 flex items-center justify-center gap-2 px-4 py-3.5 rounded-xl font-bold transition-all',
-            'shadow-lg hover:shadow-xl hover:-translate-y-0.5 active:translate-y-0',
-            session.status === 'overdue'
-              ? 'gradient-warning text-white'
-              : 'gradient-success text-white'
+            'flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg font-bold text-xs transition-all text-white',
+            session.status === 'overdue' ? 'gradient-warning' : 'gradient-success'
           )}
         >
-          <Snowflake className="w-5 h-5" />
+          <Snowflake className="w-4 h-4" />
           <span>Move to Fridge</span>
         </button>
         <button
           onClick={() => onDiscard(session.id)}
-          className="px-4 py-3.5 rounded-xl bg-theme-ghost text-theme-muted hover:bg-red-500/20 hover:text-red-500 transition-all font-medium"
+          className="w-10 flex items-center justify-center rounded-lg bg-theme-ghost text-theme-muted hover:bg-red-500/20 hover:text-red-500 transition-colors"
           title="Discard item"
         >
-          <Trash2 className="w-5 h-5" />
+          <Trash2 className="w-4 h-4" />
         </button>
       </div>
     </div>
@@ -251,7 +225,7 @@ export function CoolingSensorCardCompact({ session, onClose, onDiscard, referenc
       const now = new Date()
       const hardDue = new Date(session.hard_due_at)
       const remainingMs = hardDue.getTime() - now.getTime()
-      
+
       if (remainingMs <= 0) {
         setTimeRemaining('OVERDUE')
       } else {
@@ -285,7 +259,7 @@ export function CoolingSensorCardCompact({ session, onClose, onDiscard, referenc
           <Snowflake className="w-5 h-5 text-white" />
         )}
       </div>
-      
+
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
           {referenceNumber !== undefined && (

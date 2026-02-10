@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, lazy, Suspense, startTransition } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { Toaster } from 'sonner'
+import { Toaster, toast } from 'sonner'
 import { useAppStore } from '@/store/useAppStore'
 import { MainLayout } from '@/components/layout/MainLayout'
 
@@ -19,9 +19,11 @@ import { ReceiptHistoryScreen } from '@/components/receipt/ReceiptHistoryScreen'
 const LandingPage = lazy(() => import('@/components/landing/LandingPage').then(m => ({ default: m.LandingPage })))
 const OnboardingQuestionnaire = lazy(() => import('@/components/onboarding/OnboardingQuestionnaire').then(m => ({ default: m.OnboardingQuestionnaire })))
 import { supabase, isSupabaseConfigured, DEMO_SITE_ID } from '@/lib/supabase'
-import { getStaffMembers, getSiteSettings } from '@/services/settingsService'
-import { fetchCoolingSessions, createCoolingSession } from '@/services/coolingService'
-import type { Site, CoolingSession } from '@/types'
+import { getSiteSettings } from '@/services/settingsService'
+import { getStaffMembers, verifyPin } from '@/services/staffService'
+import { PinPad } from '@/components/auth/PinPad'
+import { fetchCoolingSessions } from '@/services/coolingService'
+import type { Site } from '@/types'
 import type { User, Session } from '@supabase/supabase-js'
 
 // Create a client
@@ -54,11 +56,34 @@ function AppContent() {
   const [showLanding, setShowLanding] = useState(true)
   const { setCurrentSite, setIsOnline, currentSite, settings, updateSettings, setStaffMembers, setCoolingSessions, setIsDemo, isDemo } = useAppStore()
 
+  // Track component mount state
+  const isMounted = useRef(true)
+  useEffect(() => {
+    return () => { isMounted.current = false }
+  }, [])
+
+  // Sync authState to ref for usage in effects
+  const authStateRef = useRef(authState)
+  const currentAuthUserRef = useRef<string | null>(null)
+
+  useEffect(() => {
+    authStateRef.current = authState
+  }, [authState])
+
   // Main authentication effect - runs once on mount
   useEffect(() => {
-    // Skip auth check if we're in demo mode
-    if (authState === 'demo' || isDemo) {
-      console.log('🎮 In demo mode - skipping auth check')
+    // Handle persisted demo mode
+    if (isDemo) {
+      if (authState !== 'demo') {
+        console.log('🎮 Restoring demo session')
+        setAuthState('demo')
+        setShowLanding(false)
+      }
+      return
+    }
+
+    // Skip auth check if we're already in demo state
+    if (authStateRef.current === 'demo') {
       return
     }
 
@@ -68,62 +93,104 @@ function AppContent() {
       return
     }
 
-    let mounted = true
-    let authStateRef: AuthState = authState // Track state locally to avoid stale closure
-
-    // Skip if already determined (not loading)
-    if (authState !== 'loading') {
-      return
-    }
-
-    // Timeout to prevent infinite loading - show landing after 1.5 seconds
-    const loadingTimeout = setTimeout(() => {
-      if (mounted && authStateRef === 'loading') {
-        console.log('⏰ Auth check timeout - showing landing')
-        setAuthState('unauthenticated')
-        authStateRef = 'unauthenticated'
-      }
-    }, 1500)
+    // Track if auth check has started (no timeout - user said they don't care about delays)
+    let profileCheckInProgress = false
 
     // Function to check profile and determine auth state
     const checkProfileAndSetState = async (session: Session) => {
-      if (!mounted) return
+      // Prevent duplicate calls
+      if (profileCheckInProgress) {
+        console.log('⏳ Profile check already in progress, skipping duplicate call')
+        return
+      }
+
+      // Update ref immediately to block other listeners synchronously
+      currentAuthUserRef.current = session.user.id
+      profileCheckInProgress = true
 
       try {
-        const { data: profile, error } = await supabase
+        console.log('🔍 Checking profile for:', session.user.email)
+
+        // Race against a timeout - if it hangs, we MUST release the user
+        const profilePromise = supabase
           .from('profiles')
           .select('onboarding_completed')
           .eq('id', session.user.id)
-          .maybeSingle() as { data: { onboarding_completed: boolean } | null; error: any }
+          .maybeSingle()
 
-        if (!mounted) return
+        const timeoutPromise = new Promise<{ timeout: true }>((resolve) =>
+          setTimeout(() => resolve({ timeout: true }), 5000)
+        )
 
-        console.log('👤 Profile check:', { profile, error })
+        const result = await Promise.race([profilePromise, timeoutPromise])
 
-        if (error || !profile || !profile.onboarding_completed) {
-          setAuthState('onboarding')
-          authStateRef = 'onboarding'
-        } else {
-          setAuthState('authenticated')
-          authStateRef = 'authenticated'
+        if ('timeout' in result) {
+          console.warn('⚠️ Profile check timed out - defaulting to unauthenticated to avoid hang')
+          toast.error('Connection timed out. Please sign in again.')
+
+          // UI Update FIRST - Don't wait for network
+          setUser(null)
+          setAuthState('unauthenticated')
+          setShowLanding(true)
+          currentAuthUserRef.current = null // Clear ref on failure
+
+          // Cleanup in background (fire and forget)
+          localStorage.clear()
+          sessionStorage.setItem('manual_logout', 'true')
+          supabase.auth.signOut().catch(e => console.error('SignOut error:', e))
+          return
         }
+
+        const { data: profile, error } = result as any
+
+        console.log('👤 Profile check result:', { profile, error })
+
+        if (error) {
+          console.error('Profile query error:', error)
+          // On error, show onboarding to be safe
+          setAuthState('onboarding')
+        } else if (!profile || !profile.onboarding_completed) {
+          console.log('⚠️ Onboarding incomplete or profile missing')
+          // New company → questionnaire
+          setAuthState('onboarding')
+        } else {
+          console.log('✅ Profile verified - routing to Dashboard')
+          // Existing company → dashboard
+          setAuthState('authenticated')
+          // Unlock Kiosk Mode for the authenticated user (Manager/Owner)
+          useAppStore.getState().unlockKiosk(session.user.id)
+        }
+        setShowLanding(false)
       } catch (err) {
         console.error('Profile check error:', err)
-        if (mounted) {
-          setAuthState('onboarding')
-          authStateRef = 'onboarding'
-        }
+        setAuthState('onboarding')
+        setShowLanding(false)
+        currentAuthUserRef.current = null // Clear ref on error
+      } finally {
+        profileCheckInProgress = false
       }
     }
 
-    // Initial session check
+    // Initial session check - runs once on mount
     const initAuth = async () => {
       console.log('🔍 Initializing auth...')
 
+      // Check for manual logout flag to break loops
+      if (sessionStorage.getItem('manual_logout')) {
+        console.log('🛑 Manual logout flag detected - forcing sign out')
+        sessionStorage.removeItem('manual_logout')
+        await supabase.auth.signOut().catch(console.error)
+        localStorage.clear()
+
+        setUser(null)
+        setAuthState('unauthenticated')
+        setShowLanding(true)
+        currentAuthUserRef.current = null
+        return
+      }
+
       try {
         const { data: { session }, error } = await supabase.auth.getSession()
-
-        if (!mounted) return
 
         console.log('📊 Initial session:', {
           hasSession: !!session,
@@ -136,55 +203,60 @@ function AppContent() {
           await checkProfileAndSetState(session)
         } else {
           setAuthState('unauthenticated')
-          authStateRef = 'unauthenticated'
+          currentAuthUserRef.current = null
         }
-      } catch (err) {
+      } catch (err: any) {
         console.error('Auth init error:', err)
-        if (mounted) {
-          setAuthState('unauthenticated')
-          authStateRef = 'unauthenticated'
-        }
+        setAuthState('unauthenticated')
+        currentAuthUserRef.current = null
       }
     }
 
     initAuth()
 
-    // Listen for auth state changes
+    // Listen for auth state changes (sign in/out events)
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
         console.log('🔄 Auth event:', event, session?.user?.email)
 
-        if (!mounted) return
-
         // Don't change state if we're in demo mode
-        if (authStateRef === 'demo') {
+        if (authStateRef.current === 'demo') {
           console.log('🎮 In demo mode - ignoring auth event')
           return
         }
 
+        // Deduplicate INITIAL_SESSION vs SIGNED_IN race
+        if (event === 'INITIAL_SESSION') {
+          // initAuth handles this manually to ensure profile check
+          return
+        }
+
+        // Only process explicit sign in/out events, not duplicates
         if (event === 'SIGNED_IN' && session?.user) {
+          // Check if we are already processing/authenticated with this user
+          if (currentAuthUserRef.current === session.user.id) {
+            console.log('🔄 User already authenticated/processing - ignoring duplicate SIGNED_IN')
+            return
+          }
+
           setUser(session.user)
           await checkProfileAndSetState(session)
         } else if (event === 'SIGNED_OUT') {
           setUser(null)
           setAuthState('unauthenticated')
-          authStateRef = 'unauthenticated'
+          setShowLanding(true)
+          currentAuthUserRef.current = null
         } else if (event === 'TOKEN_REFRESHED' && session?.user) {
           setUser(session.user)
-        } else if (event === 'INITIAL_SESSION' && session?.user) {
-          // Handle OAuth redirect - session already established
-          setUser(session.user)
-          await checkProfileAndSetState(session)
         }
+        // Note: INITIAL_SESSION is handled by initAuth(), don't duplicate
       }
     )
 
     return () => {
-      mounted = false
-      clearTimeout(loadingTimeout)
       subscription.unsubscribe()
     }
-  }, [authState]) // Re-run when authState changes to handle demo mode
+  }, []) // Run once, depend on refs
 
   // Apply theme class to document
   useEffect(() => {
@@ -387,16 +459,12 @@ function AppContent() {
     })
   }
 
-  // Handle logout
-  const handleLogout = async () => {
-    console.log('🚪 Logging out...')
-    await supabase.auth.signOut()
-    setShowLanding(true)
-  }
+
 
   // Handle onboarding complete
   const handleOnboardingComplete = () => {
     setAuthState('authenticated')
+    setShowLanding(false)
   }
 
   // Handle demo mode start - Auto login with persistent demo user
@@ -438,9 +506,11 @@ function AppContent() {
       await new Promise(resolve => setTimeout(resolve, 300))
 
       try {
-        const [settingsRecord, staffData] = await Promise.all([
+        // Fetch data from Supabase for the demo site
+        const [settingsRecord, staffData, coolingData] = await Promise.all([
           getSiteSettings(FALLBACK_DEMO_SITE.id),
-          getStaffMembers(FALLBACK_DEMO_SITE.id)
+          getStaffMembers(FALLBACK_DEMO_SITE.id),
+          fetchCoolingSessions(FALLBACK_DEMO_SITE.id)
         ])
 
         if (settingsRecord) {
@@ -477,88 +547,13 @@ function AppContent() {
           console.warn('⚠️ No demo staff found in database')
         }
 
-        // Delete old demo cooling sessions and create fresh ones
-        let demoSessions: CoolingSession[] = []
-        const now = new Date()
-        
-        // First, delete all existing cooling sessions for the demo site to ensure fresh timestamps
-        try {
-          const { data: existingSessions, error: fetchError } = await (supabase
-            .from('cooling_sessions') as any)
-            .select('id')
-            .eq('site_id', FALLBACK_DEMO_SITE.id)
-          
-          if (!fetchError && existingSessions && existingSessions.length > 0) {
-            console.log(`🗑️ Deleting ${existingSessions.length} old demo cooling sessions`)
-            const { error: deleteError } = await (supabase
-              .from('cooling_sessions') as any)
-              .delete()
-              .eq('site_id', FALLBACK_DEMO_SITE.id)
-            
-            if (deleteError) {
-              console.warn('Failed to delete old cooling sessions:', deleteError)
-            } else {
-              console.log('✅ Deleted old demo cooling sessions')
-            }
-          }
-        } catch (err) {
-          console.warn('Could not delete old cooling sessions:', err)
+        if (coolingData && coolingData.length > 0) {
+          console.log(`❄️ Loaded ${coolingData.length} demo cooling sessions from database`)
+          setCoolingSessions(coolingData)
+        } else {
+          console.log('❄️ No demo cooling sessions found in database - keeping local sessions')
+          // Do NOT wipe local sessions to verify persistence
         }
-
-        // Always create fresh demo sessions with current-relative timestamps
-        // 1. Overdue session (RED) - started 150 minutes ago (2.5 hours)
-        const overdueSession = createCoolingSession('Chicken Curry', 'soup', FALLBACK_DEMO_SITE.id, 'demo-user')
-        const overdueStartTime = new Date(now.getTime() - 150 * 60 * 1000)
-        overdueSession.started_at = overdueStartTime.toISOString()
-        overdueSession.soft_due_at = new Date(overdueStartTime.getTime() + 90 * 60 * 1000).toISOString()
-        overdueSession.hard_due_at = new Date(overdueStartTime.getTime() + 120 * 60 * 1000).toISOString()
-        overdueSession.status = 'overdue'
-        overdueSession.staff_name = 'Chef Maria'
-        demoSessions.push(overdueSession)
-
-        // 2. Warning session (AMBER) - started 100 minutes ago (1h 40m)
-        const warningSession = createCoolingSession('Beef Stew', 'soup', FALLBACK_DEMO_SITE.id, 'demo-user')
-        const warningStartTime = new Date(now.getTime() - 100 * 60 * 1000)
-        warningSession.started_at = warningStartTime.toISOString()
-        warningSession.soft_due_at = new Date(warningStartTime.getTime() + 90 * 60 * 1000).toISOString()
-        warningSession.hard_due_at = new Date(warningStartTime.getTime() + 120 * 60 * 1000).toISOString()
-        warningSession.status = 'warning'
-        warningSession.staff_name = 'Chef John'
-        demoSessions.push(warningSession)
-
-        // 3. Active session 1 (BLUE) - started 15 minutes ago
-        const activeSession1 = createCoolingSession('Tomato Sauce', 'sauce', FALLBACK_DEMO_SITE.id, 'demo-user')
-        const activeStartTime1 = new Date(now.getTime() - 15 * 60 * 1000)
-        activeSession1.started_at = activeStartTime1.toISOString()
-        activeSession1.soft_due_at = new Date(activeStartTime1.getTime() + 90 * 60 * 1000).toISOString()
-        activeSession1.hard_due_at = new Date(activeStartTime1.getTime() + 120 * 60 * 1000).toISOString()
-        activeSession1.status = 'active'
-        activeSession1.staff_name = 'Chef Maria'
-        demoSessions.push(activeSession1)
-
-        // 4. Active session 2 (BLUE) - started 5 minutes ago
-        const activeSession2 = createCoolingSession('Bolognese', 'sauce', FALLBACK_DEMO_SITE.id, 'demo-user')
-        const activeStartTime2 = new Date(now.getTime() - 5 * 60 * 1000)
-        activeSession2.started_at = activeStartTime2.toISOString()
-        activeSession2.soft_due_at = new Date(activeStartTime2.getTime() + 90 * 60 * 1000).toISOString()
-        activeSession2.hard_due_at = new Date(activeStartTime2.getTime() + 120 * 60 * 1000).toISOString()
-        activeSession2.status = 'active'
-        activeSession2.staff_name = 'Chef John'
-        demoSessions.push(activeSession2)
-
-        console.log(`❄️ Created ${demoSessions.length} demo cooling sessions (overdue, warning, active)`)
-        
-        // Sync demo sessions to database so they persist
-        const { syncSessionToSupabase } = await import('@/services/coolingService')
-        for (const session of demoSessions) {
-          try {
-            await syncSessionToSupabase(session)
-          } catch (err) {
-            console.warn('Failed to sync demo session:', err)
-          }
-        }
-        
-        setCoolingSessions(demoSessions)
       } catch (err) {
         console.warn('Failed to load demo site data:', err)
       }
@@ -575,6 +570,108 @@ function AppContent() {
     setCurrentSite(null as any)
     setStaffMembers([])
     setShowLanding(true)
+  }
+
+  // Kiosk PIN Logic
+  const [pinError, setPinError] = useState<string | null>(null)
+  const [pinLoading, setPinLoading] = useState(false)
+  const { kioskMode, kioskLocked, lockKiosk, unlockKiosk, staffMembers } = useAppStore()
+
+  const handlePinSubmit = async (pin: string) => {
+    if (!currentSite?.id) return
+    setPinLoading(true)
+    setPinError(null)
+
+    try {
+      // Find staff by PIN locally first (faster) checking active staff
+      // logic: we have staffMembers in store, we can check there
+      const staff = staffMembers.find(s => s.staff_code === pin || (s as any).pin === pin)
+
+      // If found locally, verify
+      if (staff) {
+        if (!staff.active) {
+          setPinError('Staff member is inactive')
+          setPinLoading(false)
+          return
+        }
+        unlockKiosk(staff.id)
+        toast.success(`Welcome back, ${staff.name.split(' ')[0]}!`)
+        setPinLoading(false)
+        return
+      }
+
+      // Fallback to server verify (for security or if local is stale)
+      const verifiedStaff = await verifyPin(currentSite.id, pin)
+      if (verifiedStaff) {
+        unlockKiosk(verifiedStaff.id)
+        toast.success(`Welcome back, ${verifiedStaff.name.split(' ')[0]}!`)
+      } else {
+        setPinError('Invalid PIN code')
+      }
+    } catch (err) {
+      console.error('PIN verify error:', err)
+      setPinError('Error verifying PIN')
+    } finally {
+      setPinLoading(false)
+    }
+  }
+
+  // Auto-lock on idle (5 minutes)
+  useEffect(() => {
+    if (!kioskMode || kioskLocked) return
+
+    let timeout: NodeJS.Timeout
+    const resetTimer = () => {
+      clearTimeout(timeout)
+      timeout = setTimeout(() => {
+        console.log('🔒 Kiosk auto-lock triggered')
+        lockKiosk()
+      }, 5 * 60 * 1000) // 5 minutes
+    }
+
+    // Events to monitor
+    const events = ['mousedown', 'mousemove', 'keydown', 'scroll', 'touchstart']
+    events.forEach(e => document.addEventListener(e, resetTimer))
+
+    resetTimer()
+
+    return () => {
+      clearTimeout(timeout)
+      events.forEach(e => document.removeEventListener(e, resetTimer))
+    }
+  }, [kioskMode, kioskLocked, lockKiosk])
+
+  // If in Kiosk Mode and Locked, show PinPad overlay
+  // But ONLY if we are authenticated (or in demo mode) and have a site loaded
+  const showPinPad = kioskMode && kioskLocked && (authState === 'authenticated' || authState === 'demo') && currentSite
+
+  if (showPinPad) {
+    return (
+      <div className="fixed inset-0 z-[100] bg-background/95 backdrop-blur-sm flex flex-col items-center justify-center animate-in fade-in duration-300">
+        <PinPad
+          onSuccess={handlePinSubmit}
+          error={pinError}
+          isLoading={pinLoading}
+          label={currentSite?.name ? `${currentSite.name}` : "Kiosk Locked"}
+        />
+        <div className="mt-8 flex gap-4">
+          {authState === 'demo' && (
+            <button
+              onClick={handleExitDemo}
+              className="text-muted-foreground hover:text-foreground text-sm"
+            >
+              Exit Demo
+            </button>
+          )}
+          <button
+            onClick={() => useAppStore.getState().setKioskMode(false)}
+            className="text-muted-foreground hover:text-foreground text-sm"
+          >
+            Exit Kiosk Mode (Dev)
+          </button>
+        </div>
+      </div>
+    )
   }
 
   // Render current screen content (without layout wrapper - MainLayout handles that)
@@ -643,27 +740,48 @@ function AppContent() {
       boxShadow: '0 4px 20px rgba(0, 0, 0, 0.3)',
     }
 
-  // Loading state
-  if (authState === 'loading') {
+  // Loading fallback component with timeout escape hatch
+  const LoadingFallback = () => {
+    const [showEscape, setShowEscape] = useState(false)
+
+    useEffect(() => {
+      const timer = setTimeout(() => setShowEscape(true), 5000)
+      return () => clearTimeout(timer)
+    }, [])
+
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 flex items-center justify-center">
-        <div className="text-center">
+      <div className="min-h-screen bg-theme-primary flex flex-col items-center justify-center p-4">
+        <div className="text-center mb-8">
           <div className="w-12 h-12 border-4 border-emerald-500/30 border-t-emerald-500 rounded-full animate-spin mx-auto mb-4"></div>
-          <p className="text-slate-400 text-sm">Loading...</p>
+          <p className="text-theme-muted text-sm animate-pulse">Loading Kitchen Compliance...</p>
         </div>
+
+        {showEscape && (
+          <div className="animate-fade-in text-center">
+            <p className="text-xs text-theme-muted mb-3">Taking longer than expected?</p>
+            <button
+              onClick={async () => {
+                const { supabase } = await import('@/lib/supabase')
+                sessionStorage.setItem('manual_logout', 'true')
+                localStorage.clear()
+                // Fire and forget sign out, then reload immediately
+                supabase.auth.signOut().catch(console.error)
+                window.location.reload()
+              }}
+              className="px-4 py-2 bg-theme-bg border border-theme-primary rounded-lg text-theme-muted text-xs hover:text-theme-primary transition-colors"
+            >
+              Reload Application
+            </button>
+          </div>
+        )}
       </div>
     )
   }
 
-  // Loading fallback component
-  const LoadingFallback = () => (
-    <div className="min-h-screen bg-theme-primary flex items-center justify-center">
-      <div className="text-center">
-        <div className="w-10 h-10 border-4 border-emerald-500/30 border-t-emerald-500 rounded-full animate-spin mx-auto mb-3"></div>
-        <p className="text-theme-muted text-sm">Loading...</p>
-      </div>
-    </div>
-  )
+  // Loading state
+  if (authState === 'loading') {
+    return <LoadingFallback />
+  }
 
   // Always show landing first
   if (showLanding) {
@@ -702,10 +820,10 @@ function AppContent() {
     }
 
     return (
-      <>
+      <div className="has-demo-banner" style={{ '--banner-height': '40px' } as any}>
         {/* Demo Banner */}
-        <div className="fixed top-0 left-0 right-0 z-[60] bg-emerald-500 text-white py-2 px-4 text-center text-sm font-semibold">
-          🎮 Demo Mode - Explore freely! Data saves to demo database.
+        <div className="fixed top-0 left-0 right-0 h-10 z-[60] bg-emerald-500 text-white py-2 px-4 text-center text-sm font-semibold flex items-center justify-center">
+          <span>🎮 Demo Mode - Explore freely! Data saves to demo database.</span>
           <button
             onClick={handleExitDemo}
             className="ml-4 px-3 py-1 bg-black/20 rounded-lg hover:bg-black/30 transition-colors"
@@ -717,7 +835,7 @@ function AppContent() {
           {renderScreen()}
         </div>
         <Toaster position="top-center" toastOptions={{ style: toastStyle }} />
-      </>
+      </div>
     )
   }
 
@@ -740,12 +858,6 @@ function AppContent() {
   // Authenticated - show dashboard (no Suspense - screens are direct imports for instant navigation)
   return (
     <>
-      <button
-        onClick={handleLogout}
-        className="fixed top-4 right-4 z-50 px-4 py-2 bg-red-500/20 border border-red-500/50 text-red-400 rounded-lg text-sm hover:bg-red-500/30 transition-colors"
-      >
-        🚪 Logout
-      </button>
       {renderScreen()}
       <Toaster position="top-center" toastOptions={{ style: toastStyle }} />
     </>

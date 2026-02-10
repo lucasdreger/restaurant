@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { isLike } from '@/lib/stringUtils'
 
 /**
  * Wake Word Detection Hook
@@ -33,10 +34,14 @@ interface SpeechRecognition extends EventTarget {
   onerror: ((this: SpeechRecognition, ev: SpeechRecognitionErrorEvent) => void) | null
 }
 
+
 // Check if transcript contains any wake word from the list
 function containsWakeWord(transcript: string, wakeWords: string[]): boolean {
-  const lower = transcript.toLowerCase().trim()
-  return wakeWords.some(wake => lower.includes(wake.toLowerCase()))
+  // Use fuzzy matching for better detection in noise
+  // But strictly ignore very short inputs to reduce false positives
+  if (transcript.length < 3) return false
+
+  return wakeWords.some(wake => isLike(transcript, wake))
 }
 
 // Extract command after wake word (if any)
@@ -44,12 +49,23 @@ function extractCommandAfterWakeWord(transcript: string, wakeWords: string[]): s
   const lower = transcript.toLowerCase().trim()
 
   for (const wake of wakeWords) {
-    const wakeLower = wake.toLowerCase()
-    const index = lower.indexOf(wakeLower)
-    if (index !== -1) {
-      const afterWake = transcript.slice(index + wake.length).trim()
-      // Allow single characters (for numbers like "2" or "#2")
-      return afterWake.length >= 1 ? afterWake : null
+    if (isLike(lower, wake)) {
+      // approximate match found, try to strip it
+      // Since it's fuzzy, we can't just slice by length of wake word
+      // Simple heuristic: remove the first occurrence of the wake word (or close to it)
+      // For now, simpler approach: if it *starts* with something like wake word
+      const parts = lower.split(' ')
+      if (parts.length > 1) {
+        // Assume first part(s) might be wake word. 
+        // This is tricky with fuzzy matching. 
+        // Let's stick to standard slice if exact match, otherwise try best guess
+        const wakeLower = wake.toLowerCase()
+        const index = lower.indexOf(wakeLower)
+        if (index !== -1) {
+          const afterWake = transcript.slice(index + wake.length).trim()
+          return afterWake.length >= 1 ? afterWake : null
+        }
+      }
     }
   }
   return null

@@ -5,6 +5,7 @@ export interface Fridge {
   id: string
   site_id: string
   name: string
+  fridge_code?: string
   sort_order: number
   min_temp: number
   max_temp: number
@@ -48,8 +49,21 @@ export async function getFridges(siteId: string): Promise<Fridge[]> {
     return [{
       id: 'demo-fridge-1',
       site_id: siteId,
-      name: 'Main Fridge',
+      name: 'Ex1',
+      fridge_code: '1',
       sort_order: 0,
+      min_temp: 0,
+      max_temp: 5,
+      active: true,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    },
+    {
+      id: 'demo-fridge-2',
+      site_id: siteId,
+      name: 'Main Fridge',
+      fridge_code: '2',
+      sort_order: 1,
       min_temp: 0,
       max_temp: 5,
       active: true,
@@ -70,7 +84,7 @@ export async function getFridges(siteId: string): Promise<Fridge[]> {
 }
 
 // Create a new fridge
-export async function createFridge(siteId: string, name: string): Promise<Fridge> {
+export async function createFridge(siteId: string, name: string, fridgeCode?: string): Promise<Fridge> {
   if (!isSupabaseConfigured()) {
     throw new Error('Database not configured')
   }
@@ -89,6 +103,7 @@ export async function createFridge(siteId: string, name: string): Promise<Fridge
     .insert({
       site_id: siteId,
       name: name,
+      fridge_code: fridgeCode || (sortOrder + 1).toString(),
       sort_order: sortOrder,
     })
     .select()
@@ -205,7 +220,7 @@ export async function getFridgeTempLogs(
 export async function getTodaysFridgeLogs(siteId: string, fridgeId: string): Promise<FridgeTempLog[]> {
   const today = new Date()
   today.setHours(0, 0, 0, 0)
-  
+
   return getFridgeTempLogs(siteId, {
     fridgeId,
     startDate: today.toISOString(),

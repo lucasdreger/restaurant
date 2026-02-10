@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { VoiceCommand } from '@/types'
 import { parseVoiceCommand } from '@/lib/voiceCommands'
+import { ttsService } from '@/services/ttsService'
+import { useAppStore } from '@/store/useAppStore'
 
 // Use refs for callbacks to avoid recreating recognition on every render
 
@@ -51,31 +53,31 @@ export function useVoiceRecognition(options: UseVoiceRecognitionOptions = {}) {
   const [transcript, setTranscript] = useState('')
   const [error, setError] = useState<string | null>(null)
   const recognitionRef = useRef<SpeechRecognition | null>(null)
-  
+
   // Use refs for callbacks to prevent recreation of recognition
   const onCommandRef = useRef(onCommand)
   const onTranscriptRef = useRef(onTranscript)
   const onErrorRef = useRef(onError)
   const disabledRef = useRef(disabled)
-  
+
   // Keep refs up to date
   useEffect(() => {
     onCommandRef.current = onCommand
   }, [onCommand])
-  
+
   useEffect(() => {
     onTranscriptRef.current = onTranscript
   }, [onTranscript])
-  
+
   useEffect(() => {
     onErrorRef.current = onError
   }, [onError])
-  
+
   // Keep disabled ref in sync
   useEffect(() => {
     disabledRef.current = disabled
   }, [disabled])
-  
+
   // Use local state instead of global to avoid conflicts with other voice hooks
   const [isListening, setIsListening] = useState(false)
 
@@ -103,7 +105,7 @@ export function useVoiceRecognition(options: UseVoiceRecognitionOptions = {}) {
       }
       return
     }
-    
+
     if (!isSupported) return
 
     const SpeechRecognitionAPI =
@@ -146,7 +148,7 @@ export function useVoiceRecognition(options: UseVoiceRecognitionOptions = {}) {
       // Handle different error types with user-friendly messages
       let errorMsg: string
       let shouldNotify = true
-      
+
       switch (event.error) {
         case 'aborted':
           // User cancelled or recognition was stopped - this is normal
@@ -171,10 +173,10 @@ export function useVoiceRecognition(options: UseVoiceRecognitionOptions = {}) {
         default:
           errorMsg = `Voice error: ${event.error}`
       }
-      
+
       setError(shouldNotify ? errorMsg : null)
       setIsListening(false)
-      
+
       if (shouldNotify) {
         onErrorRef.current?.(errorMsg)
       }
@@ -195,7 +197,7 @@ export function useVoiceRecognition(options: UseVoiceRecognitionOptions = {}) {
       console.log('[Voice] startListening blocked - hook is disabled')
       return
     }
-    
+
     if (!recognitionRef.current || isListening) return
 
     try {
@@ -244,51 +246,47 @@ export function useTextToSpeech() {
   const [isSupported, setIsSupported] = useState(false)
   const [isSpeaking, setIsSpeaking] = useState(false)
 
+  const { settings } = useAppStore()
+
+  // Configure TTS service on mount/settings change
+  useEffect(() => {
+    ttsService.configure({
+      apiKey: settings.openaiApiKey || undefined,
+      useOpenAI: settings.voiceProvider === 'openai' && settings.ttsEnabled,
+      voice: 'alloy' // Always use a valid TTS voice model, ignoring STT model setting
+    })
+  }, [settings.openaiApiKey, settings.voiceProvider, settings.ttsEnabled, settings.audioModel])
+
   useEffect(() => {
     setIsSupported('speechSynthesis' in window)
   }, [])
 
   const speak = useCallback(
     (text: string, options: { rate?: number; pitch?: number; onComplete?: () => void } = {}) => {
-      if (!isSupported || isSpeaking) return
+      // Don't block if already speaking, queue it (service handles queuing)
+      // if (!isSupported || isSpeaking) return
 
-      // Add natural punctuation/pauses for better speech flow
-      const naturalText = text
-        .replace(/(\d+)\s*degrees?/gi, '$1 degrees.') // Pause after temperature
-        .replace(/\bwell done\b/gi, '. Well done!') // Pause before praise
-        .replace(/\bat\b/g, ', at') // Small pause for "at"
-        .replace(/\bby\b/g, ', by') // Small pause for "by"
-        .replace(/\b(closing|starting|finished)\b/gi, '$1,') // Pause after actions
-        .replace(/\bsay\b/gi, '. Say') // Pause before instructions
-        .replace(/confirm to save/gi, 'confirm, to save') // Better flow
-
-      const utterance = new SpeechSynthesisUtterance(naturalText)
-      utterance.rate = options.rate || 0.95 // Slightly slower, more natural
-      utterance.pitch = options.pitch || 1.0
-      utterance.lang = 'en-IE'
-      utterance.volume = 0.9 // Slightly softer volume
-
-      utterance.onstart = () => setIsSpeaking(true)
-      utterance.onend = () => {
-        setIsSpeaking(false)
-        options.onComplete?.()
-      }
-      utterance.onerror = () => {
-        setIsSpeaking(false)
-        options.onComplete?.()
-      }
-
-      window.speechSynthesis.speak(utterance)
+      ttsService.speak(text, {
+        rate: options.rate,
+        pitch: options.pitch,
+        onStart: () => setIsSpeaking(true),
+        onEnd: () => {
+          setIsSpeaking(false)
+          options.onComplete?.()
+        },
+        onError: () => {
+          setIsSpeaking(false)
+          options.onComplete?.()
+        }
+      })
     },
-    [isSupported, isSpeaking]
+    []
   )
 
   const cancel = useCallback(() => {
-    if (isSupported) {
-      window.speechSynthesis.cancel()
-      setIsSpeaking(false)
-    }
-  }, [isSupported])
+    ttsService.cancel()
+    setIsSpeaking(false)
+  }, [])
 
   return {
     isSupported,

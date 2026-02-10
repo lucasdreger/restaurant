@@ -10,11 +10,20 @@ interface FridgeTempModalProps {
   onClose: () => void
   onSuccess?: () => void
   preselectedFridgeIndex?: number
+  preselectedTemperature?: number | null
+  preselectedStaffId?: string | null
 }
 
-export function FridgeTempModal({ isOpen, onClose, onSuccess, preselectedFridgeIndex }: FridgeTempModalProps) {
+export function FridgeTempModal({
+  isOpen,
+  onClose,
+  onSuccess,
+  preselectedFridgeIndex,
+  preselectedTemperature,
+  preselectedStaffId
+}: FridgeTempModalProps) {
   const { currentSite, settings, staffMembers } = useAppStore()
-  
+
   const [fridges, setFridges] = useState<Fridge[]>([])
   const [selectedFridgeIndex, setSelectedFridgeIndex] = useState(0)
   const [temperature, setTemperature] = useState('')
@@ -31,12 +40,19 @@ export function FridgeTempModal({ isOpen, onClose, onSuccess, preselectedFridgeI
     }
   }, [isOpen, currentSite?.id])
 
-  // Apply preselected fridge index when provided
+  // Apply preselected temperature and fridge index
   useEffect(() => {
-    if (preselectedFridgeIndex !== undefined && preselectedFridgeIndex >= 0) {
-      setSelectedFridgeIndex(preselectedFridgeIndex)
+    if (isOpen) {
+      if (preselectedFridgeIndex !== undefined && preselectedFridgeIndex >= 0) {
+        setSelectedFridgeIndex(preselectedFridgeIndex)
+      }
+      if (preselectedTemperature !== undefined && preselectedTemperature !== null) {
+        setTemperature(preselectedTemperature.toString())
+      } else {
+        setTemperature('')
+      }
     }
-  }, [preselectedFridgeIndex, isOpen])
+  }, [preselectedFridgeIndex, preselectedTemperature, isOpen])
 
   const loadFridges = async () => {
     if (!currentSite?.id) return
@@ -72,7 +88,7 @@ export function FridgeTempModal({ isOpen, onClose, onSuccess, preselectedFridgeI
   // Handle number input
   const handleNumberPress = useCallback((num: string) => {
     if (temperature.length >= 4) return // Max: -9.9 or 99.9
-    
+
     if (num === '.') {
       if (temperature.includes('.')) return
       setTemperature(prev => prev + '.')
@@ -102,7 +118,7 @@ export function FridgeTempModal({ isOpen, onClose, onSuccess, preselectedFridgeI
   // Submit temperature log
   const handleSubmit = async () => {
     if (!currentSite?.id || !currentFridge || tempValue === null) return
-    
+
     setIsLoading(true)
     try {
       await logFridgeTemp({
@@ -110,12 +126,14 @@ export function FridgeTempModal({ isOpen, onClose, onSuccess, preselectedFridgeI
         fridge_id: currentFridge.id,
         temperature: tempValue,
         // For now, we'll leave recorded_by optional
-        recorded_by_name: staffMembers[0]?.name || undefined,
+        recorded_by_name: preselectedStaffId
+          ? staffMembers.find(s => s.id === preselectedStaffId)?.name
+          : staffMembers[0]?.name || undefined,
       })
-      
+
       setShowSuccess(true)
       toast.success(`${currentFridge.name}: ${tempValue}°C logged`)
-      
+
       // If multiple fridges, go to next one
       if (fridges.length > 1 && selectedFridgeIndex < fridges.length - 1) {
         setTimeout(() => {
@@ -166,9 +184,9 @@ export function FridgeTempModal({ isOpen, onClose, onSuccess, preselectedFridgeI
           <div className="flex items-center gap-3">
             <div className={cn(
               "p-2 rounded-xl",
-              isCompliant ? "bg-emerald-500/20 text-emerald-400" : 
-              isWarning ? "bg-red-500/20 text-red-400" :
-              "bg-sky-500/20 text-sky-400"
+              isCompliant ? "bg-emerald-500/20 text-emerald-400" :
+                isWarning ? "bg-red-500/20 text-red-400" :
+                  "bg-sky-500/20 text-sky-400"
             )}>
               <Thermometer className="w-6 h-6" />
             </div>
@@ -196,7 +214,14 @@ export function FridgeTempModal({ isOpen, onClose, onSuccess, preselectedFridgeI
               <ChevronLeft className="w-5 h-5 text-theme-secondary" />
             </button>
             <div className="text-center">
-              <p className="text-sm font-semibold text-theme-primary">{currentFridge?.name}</p>
+              <p className="text-sm font-semibold text-theme-primary">
+                {currentFridge?.name}
+                {currentFridge?.fridge_code && (
+                  <span className="ml-2 px-1.5 py-0.5 bg-theme-ghost rounded text-[10px] text-theme-muted">
+                    {currentFridge.fridge_code}
+                  </span>
+                )}
+              </p>
               <p className="text-xs text-theme-muted">
                 {selectedFridgeIndex + 1} of {fridges.length}
               </p>
@@ -214,7 +239,14 @@ export function FridgeTempModal({ isOpen, onClose, onSuccess, preselectedFridgeI
         {/* Single fridge header */}
         {fridges.length === 1 && currentFridge && (
           <div className="px-4 py-3 bg-theme-secondary text-center">
-            <p className="text-sm font-semibold text-theme-primary">{currentFridge.name}</p>
+            <p className="text-sm font-semibold text-theme-primary">
+              {currentFridge.name}
+              {currentFridge.fridge_code && (
+                <span className="ml-2 px-1.5 py-0.5 bg-theme-ghost rounded text-[10px] text-theme-muted">
+                  {currentFridge.fridge_code}
+                </span>
+              )}
+            </p>
           </div>
         )}
 
@@ -223,9 +255,9 @@ export function FridgeTempModal({ isOpen, onClose, onSuccess, preselectedFridgeI
           <div className={cn(
             "w-full py-6 px-4 rounded-2xl text-center transition-colors",
             showSuccess ? "bg-emerald-500/20 border-2 border-emerald-500" :
-            isWarning ? "bg-red-500/10 border-2 border-red-500" :
-            isCompliant ? "bg-emerald-500/10 border-2 border-emerald-500/50" :
-            "bg-theme-secondary border-2 border-theme-primary"
+              isWarning ? "bg-red-500/10 border-2 border-red-500" :
+                isCompliant ? "bg-emerald-500/10 border-2 border-emerald-500/50" :
+                  "bg-theme-secondary border-2 border-theme-primary"
           )}>
             {showSuccess ? (
               <div className="flex flex-col items-center gap-2">

@@ -1344,7 +1344,7 @@ export function GoodsReceiptScreen({ onBack, onNavigate }: GoodsReceiptScreenPro
                 <option value="">Select staff member...</option>
                 {staffMembers.filter(s => s.active).map(staff => (
                   <option key={staff.id} value={staff.id}>
-                    {staff.name} ({staff.initials})
+                    {staff.name} ({staff.initials}) {staff.staff_code ? `- ${staff.staff_code}` : ''}
                   </option>
                 ))}
               </select>

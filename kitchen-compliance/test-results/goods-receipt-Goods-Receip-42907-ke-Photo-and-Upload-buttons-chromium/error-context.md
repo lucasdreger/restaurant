@@ -1,0 +1,200 @@
+# Page snapshot
+
+```yaml
+- generic [ref=e2]:
+  - generic [ref=e3]:
+    - navigation [ref=e4]:
+      - generic [ref=e6]:
+        - generic [ref=e7]:
+          - img [ref=e9]
+          - generic [ref=e11]: ChefVoice
+        - generic [ref=e12]:
+          - button "Sign In" [ref=e13]
+          - button "Start Free Trial" [ref=e14]
+    - generic [ref=e16]:
+      - generic [ref=e17]:
+        - img [ref=e18]
+        - text: FSAI Compliant • HACCP Ready
+      - heading "Stop Failing Health Inspections" [level=1] [ref=e20]:
+        - text: Stop Failing
+        - text: Health Inspections
+      - paragraph [ref=e21]: Voice-powered food safety compliance that saves 2+ hours daily on paperwork and keeps you 100% inspection-ready.
+      - generic [ref=e22]:
+        - generic [ref=e23]:
+          - img [ref=e24]
+          - generic [ref=e27]: 30-Day Free Trial
+        - generic [ref=e28]:
+          - img [ref=e29]
+          - generic [ref=e32]: Easy Setup
+        - generic [ref=e33]:
+          - img [ref=e34]
+          - generic [ref=e37]: Setup in 5 Minutes
+      - generic [ref=e38]:
+        - button "Start Your Free Trial" [ref=e39]:
+          - text: Start Your Free Trial
+          - img [ref=e40]
+        - button "🍳 Try Demo" [ref=e42]
+        - button "Sign In" [ref=e43]
+      - generic [ref=e44]:
+        - generic [ref=e45]:
+          - generic [ref=e46]: Early Access
+          - generic [ref=e47]: Limited Beta Slots
+        - generic [ref=e49]:
+          - generic [ref=e50]: 100%
+          - generic [ref=e51]: FSAI Compliant
+        - generic [ref=e53]:
+          - generic [ref=e54]: 2+ hrs
+          - generic [ref=e55]: Saved Daily
+    - generic [ref=e57]:
+      - generic [ref=e58]:
+        - heading "Sound Familiar?" [level=2] [ref=e59]
+        - paragraph [ref=e60]: These problems cost restaurants €10,000+ in fines every year
+      - generic [ref=e61]:
+        - generic [ref=e62]:
+          - img [ref=e64]
+          - heading "Missed Temperature Checks" [level=3] [ref=e66]
+          - paragraph [ref=e67]: Forgot to log that cooling batch? That's an instant critical violation.
+        - generic [ref=e68]:
+          - img [ref=e70]
+          - heading "Hours of Paperwork" [level=3] [ref=e73]
+          - paragraph [ref=e74]: Staff waste 2+ hours daily filling out temperature logs and compliance forms.
+        - generic [ref=e75]:
+          - img [ref=e77]
+          - heading "Missing Records" [level=3] [ref=e81]
+          - paragraph [ref=e82]: Inspector asks for last month's records... and you can't find them.
+    - generic [ref=e84]:
+      - generic [ref=e85]:
+        - generic [ref=e86]:
+          - img [ref=e87]
+          - text: AI-Powered Features
+        - heading "Compliance Made Effortless" [level=2] [ref=e90]
+        - paragraph [ref=e91]: Just speak and we handle the rest. No more clipboards, no more missed logs.
+      - generic [ref=e92]:
+        - generic [ref=e93]:
+          - img [ref=e95]
+          - heading "Voice Commands" [level=3] [ref=e98]
+          - paragraph [ref=e99]: Say 'Start cooling bolognese' and we track everything automatically. Hands-free compliance for busy kitchens.
+        - generic [ref=e100]:
+          - img [ref=e102]
+          - heading "Smart Temperature Tracking" [level=3] [ref=e104]
+          - paragraph [ref=e105]: 90-minute cooling timers, fridge temp logs, and automatic alerts before things go wrong.
+        - generic [ref=e106]:
+          - img [ref=e108]
+          - heading "FSAI-Ready Reports" [level=3] [ref=e112]
+          - paragraph [ref=e113]: One-click PDF reports for inspectors. All your records organized and searchable.
+        - generic [ref=e114]:
+          - img [ref=e116]
+          - heading "Real-Time Dashboard" [level=3] [ref=e118]
+          - paragraph [ref=e119]: See all active cooling sessions, compliance status, and alerts at a glance.
+    - generic [ref=e121]:
+      - generic [ref=e122]:
+        - heading "Simple, Transparent Pricing" [level=2] [ref=e123]
+        - paragraph [ref=e124]: Start free, upgrade when you're ready. Cancel anytime.
+      - generic [ref=e125]:
+        - generic [ref=e126] [cursor=pointer]:
+          - generic [ref=e127]:
+            - heading "Starter" [level=3] [ref=e128]
+            - generic [ref=e129]:
+              - generic [ref=e130]: €29
+              - generic [ref=e131]: /month
+            - paragraph [ref=e132]: Billed monthly
+          - list [ref=e133]:
+            - listitem [ref=e134]:
+              - img [ref=e135]
+              - text: 1 Kitchen Location
+            - listitem [ref=e138]:
+              - img [ref=e139]
+              - text: Cooling Timer Tracking
+            - listitem [ref=e142]:
+              - img [ref=e143]
+              - text: Basic Temperature Logs
+            - listitem [ref=e146]:
+              - img [ref=e147]
+              - text: Email Support
+            - listitem [ref=e150]:
+              - img [ref=e151]
+              - text: PDF Reports
+          - button "Start Free Trial" [ref=e154]
+        - generic [ref=e155] [cursor=pointer]:
+          - generic [ref=e156]: MOST POPULAR
+          - generic [ref=e157]:
+            - heading "Professional" [level=3] [ref=e158]
+            - generic [ref=e159]:
+              - generic [ref=e160]: €79
+              - generic [ref=e161]: /month
+            - paragraph [ref=e162]: Save €190/year with annual
+          - list [ref=e163]:
+            - listitem [ref=e164]:
+              - img [ref=e165]
+              - text: Up to 3 Locations
+            - listitem [ref=e168]:
+              - img [ref=e169]
+              - text: Voice Commands
+            - listitem [ref=e172]:
+              - img [ref=e173]
+              - text: FSAI/HACCP Templates
+            - listitem [ref=e176]:
+              - img [ref=e177]
+              - text: Priority Support
+            - listitem [ref=e180]:
+              - img [ref=e181]
+              - text: Team Management
+            - listitem [ref=e184]:
+              - img [ref=e185]
+              - text: Menu Engineering
+            - listitem [ref=e188]:
+              - img [ref=e189]
+              - text: Custom Branding
+          - button "Start Free Trial" [ref=e192]
+        - generic [ref=e193] [cursor=pointer]:
+          - generic [ref=e194]:
+            - heading "Enterprise" [level=3] [ref=e195]
+            - generic [ref=e196]:
+              - generic [ref=e197]: €199
+              - generic [ref=e198]: /month
+            - paragraph [ref=e199]: Custom pricing available
+          - list [ref=e200]:
+            - listitem [ref=e201]:
+              - img [ref=e202]
+              - text: Unlimited Locations
+            - listitem [ref=e205]:
+              - img [ref=e206]
+              - text: Everything in Pro
+            - listitem [ref=e209]:
+              - img [ref=e210]
+              - text: API Access
+            - listitem [ref=e213]:
+              - img [ref=e214]
+              - text: Dedicated Account Manager
+            - listitem [ref=e217]:
+              - img [ref=e218]
+              - text: Custom Integrations
+            - listitem [ref=e221]:
+              - img [ref=e222]
+              - text: White-Label Option
+            - listitem [ref=e225]:
+              - img [ref=e226]
+              - text: SLA Guarantee
+          - button "Contact Sales" [ref=e229]
+    - generic [ref=e231]:
+      - heading "Ready to Ace Your Next Inspection?" [level=2] [ref=e232]
+      - paragraph [ref=e233]: Join early-stage restaurants building compliance into their daily operations.
+      - button "Start Your 30-Day Free Trial" [ref=e234]:
+        - text: Start Your 30-Day Free Trial
+        - img [ref=e235]
+      - paragraph [ref=e237]: Simple setup • Cancel anytime
+    - contentinfo [ref=e238]:
+      - generic [ref=e240]:
+        - generic [ref=e241]:
+          - img [ref=e243]
+          - generic [ref=e245]: ChefVoice
+        - generic [ref=e246]:
+          - link "Privacy Policy" [ref=e247] [cursor=pointer]:
+            - /url: "#"
+          - link "Terms of Service" [ref=e248] [cursor=pointer]:
+            - /url: "#"
+          - link "Contact" [ref=e249] [cursor=pointer]:
+            - /url: "#"
+        - paragraph [ref=e250]: © 2026 ChefVoice. All rights reserved.
+  - region "Notifications alt+T"
+```

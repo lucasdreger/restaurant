@@ -132,7 +132,7 @@ export function HistoryScreen({ onBack }: HistoryScreenProps) {
   return (
     <div className="min-h-full bg-theme-primary text-theme-primary">
       {/* Header */}
-      <header className="safe-area-top bg-theme-header border-b border-theme-header sticky top-0 z-40">
+      <header className="safe-area-top bg-theme-header border-b border-theme-header sticky-header">
         <div className="flex items-center justify-between px-4 py-3">
           <div className="flex items-center gap-3">
             {/* Back button - only show on mobile/tablet */}
@@ -249,11 +249,11 @@ function HistoryItem({ session }: { session: CoolingSession }) {
     discarded: <Trash2 className="w-5 h-5 text-red-500" />,
   }
 
-  const icon = session.close_action === 'discarded' 
-    ? statusIcon.discarded 
-    : isLate 
-    ? statusIcon.overdue 
-    : statusIcon.closed
+  const icon = session.close_action === 'discarded'
+    ? statusIcon.discarded
+    : isLate
+      ? statusIcon.overdue
+      : statusIcon.closed
 
   return (
     <div className="bg-theme-card rounded-xl p-4 border border-theme-primary">

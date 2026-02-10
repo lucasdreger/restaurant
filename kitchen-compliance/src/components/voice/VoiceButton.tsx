@@ -34,18 +34,18 @@ export const VoiceButton = forwardRef<VoiceButtonHandle, VoiceButtonProps>(
   ) {
     const { speak } = useTextToSpeech()
     const { settings } = useAppStore()
-    
+
     // Check if API key is available (for both command and conversation modes)
     const hasApiKey = !!(settings.openaiApiKey || settings.openrouterApiKey)
-    
+
     // Use API voice if OpenAI or OpenRouter is configured with API key
     // For conversation mode: use Whisper if API key available (browser speech is broken)
     const useWhisper = hasApiKey && (
       !conversationMode || (conversationMode && hasApiKey)
     )
-    
-    const providerLabel = settings.voiceProvider === 'openai' 
-      ? 'OpenAI Whisper' 
+
+    const providerLabel = settings.voiceProvider === 'openai'
+      ? 'OpenAI Whisper'
       : settings.voiceProvider === 'openrouter'
         ? `OpenRouter (${settings.audioModel?.split('/')[1] || 'gpt-audio-mini'})`
         : 'Browser'
@@ -67,30 +67,30 @@ export const VoiceButton = forwardRef<VoiceButtonHandle, VoiceButtonProps>(
     // Handle command with voice feedback - defined early so hooks can use it
     const handleCommand = useCallback((command: VoiceCommand) => {
       console.log('[VoiceButton] Command received:', command, 'conversationMode:', conversationMode)
-      
+
       // CRITICAL: In conversation mode, ignore all commands (user is answering questions)
       if (conversationMode) {
         console.log('[VoiceButton] Ignoring command in conversation mode')
         return
       }
-      
-      // Give voice feedback for commands, EXCEPT for stop_cooling (the flow will speak)
-      if (command.type !== 'stop_cooling') {
+
+      // Give voice feedback for commands, EXCEPT for stop_cooling and log_fridge_temp (the flows will speak)
+      if (command.type !== 'stop_cooling' && command.type !== 'log_fridge_temp') {
         const feedback = getVoiceFeedback(command)
         if (feedback) {
           speak(feedback)
         }
       }
-      
+
       onCommand(command)
     }, [onCommand, speak, conversationMode])
-    
+
     // Handle when voice ends (for wake word resume)
     const handleEnd = useCallback(() => {
       console.log('[VoiceButton] Voice ended')
       onEnd?.()
     }, [onEnd])
-    
+
     // Browser Speech API hook for commands (parses as commands)
     // CRITICAL: Disable this hook entirely in conversation mode to prevent competing Speech Recognition instances
     const browserCommandVoice = useVoiceRecognition({
@@ -102,7 +102,7 @@ export const VoiceButton = forwardRef<VoiceButtonHandle, VoiceButtonProps>(
         handleEnd()
       },
     })
-    
+
     // Browser Speech hook for conversation (transcript only) - fallback when no API key
     const browserConversationVoice = useBrowserSpeech({
       onTranscript: (transcript, isFinal) => {
@@ -122,7 +122,7 @@ export const VoiceButton = forwardRef<VoiceButtonHandle, VoiceButtonProps>(
       onEnd: handleEnd,
       silenceTimeout: 10000, // Wait 10s for user to respond in conversation mode
     })
-    
+
     // Whisper API hook - use for both command and conversation modes when API key available
     const whisperVoice = useWhisperVoice({
       disabled: !useWhisper, // Use Whisper when API key is available
@@ -134,7 +134,7 @@ export const VoiceButton = forwardRef<VoiceButtonHandle, VoiceButtonProps>(
         handleEnd()
       },
     })
-    
+
     // Select active voice provider and normalize interface
     let isSupported: boolean
     let isListening: boolean
@@ -142,7 +142,7 @@ export const VoiceButton = forwardRef<VoiceButtonHandle, VoiceButtonProps>(
     let error: string | null
     let startListening: () => void
     let stopListening: () => void
-    
+
     if (useWhisper) {
       // Whisper API mode (for both command and conversation)
       console.log('[VoiceButton] Using Whisper API')
@@ -171,7 +171,7 @@ export const VoiceButton = forwardRef<VoiceButtonHandle, VoiceButtonProps>(
       startListening = browserCommandVoice.startListening
       stopListening = browserCommandVoice.stopListening
     }
-    
+
     const toggleListening = useCallback(() => {
       if (isListening) {
         stopListening()
@@ -179,21 +179,21 @@ export const VoiceButton = forwardRef<VoiceButtonHandle, VoiceButtonProps>(
         startListening()
       }
     }, [isListening, startListening, stopListening])
-    
+
     // Whisper has additional processing state
     const isProcessing = useWhisper ? whisperVoice.isProcessing : false
 
     // Expose triggerVoice and stopVoice methods via ref
     useImperativeHandle(ref, () => ({
       triggerVoice: () => {
-        const provider = useWhisper 
-          ? 'whisper' 
-          : conversationMode 
-            ? 'browserConversation' 
+        const provider = useWhisper
+          ? 'whisper'
+          : conversationMode
+            ? 'browserConversation'
             : 'browserCommand'
         console.log('[VoiceButton] Triggered via ref. Mode:', { conversationMode, useWhisper, provider })
         console.log('[VoiceButton] isListening:', isListening, 'isProcessing:', isProcessing)
-        
+
         if (!isListening && !isProcessing) {
           if (startListening) {
             console.log('[VoiceButton] Calling startListening for provider:', provider)
@@ -311,7 +311,7 @@ export const VoiceButton = forwardRef<VoiceButtonHandle, VoiceButtonProps>(
             <span className="text-xs text-rose-400 font-medium">Say "{wakeWordLabel}"</span>
           </div>
         )}
-        
+
         {/* Main Voice Button */}
         <button
           onClick={toggleListening}
@@ -396,14 +396,14 @@ export function VoiceButtonInline({
   className,
 }: Omit<VoiceButtonProps, 'size' | 'onEnd' | 'wakeWordActive' | 'wakeWordTriggered'>) {
   const { settings } = useAppStore()
-  
+
   // Use API voice if OpenAI or OpenRouter is configured with API key
   const useWhisper = (settings.voiceProvider === 'openai' && settings.openaiApiKey) ||
-                     (settings.voiceProvider === 'openrouter' && settings.openrouterApiKey)
-  
+    (settings.voiceProvider === 'openrouter' && settings.openrouterApiKey)
+
   const browserVoice = useVoiceRecognition({ onCommand })
   const whisperVoice = useWhisperVoice({ onCommand })
-  
+
   const voice = useWhisper ? whisperVoice : browserVoice
   const { isSupported, isListening, toggleListening } = voice
   const isProcessing = useWhisper ? whisperVoice.isProcessing : false

@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react'
-import { ArrowLeft, Check, Users, UtensilsCrossed, Sun, Moon, Palette, CreditCard, Mic, Plus, Trash2, Volume2, ShieldCheck, UserPlus, Coffee, Thermometer, Edit2, X, Building2, RotateCcw, Loader2, Scan, Eye, Zap } from 'lucide-react'
+import { ArrowLeft, Check, Users, UtensilsCrossed, Sun, Moon, Palette, CreditCard, Mic, Plus, Trash2, Volume2, ShieldCheck, UserPlus, Coffee, Thermometer, Edit2, X, Building2, RotateCcw, Loader2, Scan, Eye, Zap, LogOut } from 'lucide-react'
 import { useAppStore, type AppTheme, WAKE_WORD_OPTIONS, type WakeWordId, type OCRModel } from '@/store/useAppStore'
 import { OCR_MODEL_INFO, isProviderAvailable } from '@/services/ocrService'
 import { cn } from '@/lib/utils'
-import { getStaffMembers, createStaffMember, deleteStaffMember, getFoodPresets, createFoodPreset, deleteFoodPreset, updateSiteSubscription, getSiteSettings, upsertSiteSettings } from '@/services/settingsService'
+import { getFoodPresets, createFoodPreset, deleteFoodPreset, updateSiteSubscription, getSiteSettings, upsertSiteSettings } from '@/services/settingsService'
+import { getStaffMembers, createStaffMember, deleteStaffMember } from '@/services/staffService'
 import { getFridges, createFridge, updateFridge, deleteFridge, FRIDGE_LIMITS, type Fridge } from '@/services/fridgeService'
 import type { StaffMember, FoodItem } from '@/types/database.types'
 import { toast } from 'sonner'
@@ -52,6 +53,12 @@ export function SettingsScreen({ onBack }: SettingsScreenProps) {
   const [newFridgeName, setNewFridgeName] = useState('')
   const [editingFridgeId, setEditingFridgeId] = useState<string | null>(null)
   const [editingFridgeName, setEditingFridgeName] = useState('')
+
+  // Staff Editing
+  const [editingStaffId, setEditingStaffId] = useState<string | null>(null)
+  const [editName, setEditName] = useState('')
+  const [editRole, setEditRole] = useState<'manager' | 'chef' | 'staff'>('staff')
+  const [editCode, setEditCode] = useState('')
 
   // Load venue data on mount - only if not cached
   useEffect(() => {
@@ -202,6 +209,7 @@ export function SettingsScreen({ onBack }: SettingsScreenProps) {
         wake_word_enabled: updates.wakeWordEnabled ?? settings.wakeWordEnabled,
         active_wake_words: updates.activeWakeWords ?? settings.activeWakeWords,
       })
+      toast.success('Settings saved successfully')
     } catch (error) {
       console.error('Failed to persist site settings:', error)
       toast.error('Failed to save settings to server')
@@ -269,14 +277,42 @@ export function SettingsScreen({ onBack }: SettingsScreenProps) {
   }
 
   const handleDeleteStaff = async (id: string) => {
-    if (!confirm('Are you sure?')) return
+    if (!confirm('Remove this staff member?')) return
     try {
       await deleteStaffMember(id)
       toast.success('Staff member removed')
       setStaffList(prev => prev.filter(p => p.id !== id))
       loadStaff()
     } catch (error) {
-      toast.error('Failed to remove staff')
+      toast.error('Failed to remove staff member')
+    }
+  }
+
+  const handleUpdateStaff = async (id: string) => {
+    if (!editName.trim()) {
+      toast.error('Name is required')
+      return
+    }
+    if (editCode && editCode.length !== 4) {
+      toast.error('Staff Code must be 4 digits')
+      return
+    }
+
+    try {
+      // @ts-ignore - DB column is 'pin', but mapped types might vary. Sending 'pin' to update.
+      await updateStaffMember(id, {
+        name: editName.trim(),
+        role: editRole,
+        pin: editCode.trim() || null
+      } as any)
+
+      toast.success('Staff member updated')
+      setEditingStaffId(null)
+      // Refresh list
+      loadStaff()
+    } catch (error) {
+      console.error(error)
+      toast.error('Failed to update staff member')
     }
   }
 
@@ -605,7 +641,32 @@ export function SettingsScreen({ onBack }: SettingsScreenProps) {
                   className="btn-stunning bg-red-500 hover:bg-red-600 text-white px-6"
                 >
                   <RotateCcw className="w-4 h-4" />
-                  Reset All Data
+                </button>
+              </div>
+
+              {/* Logout Section */}
+              <div className="card-stunning p-6 border-red-500/20">
+                <div className="flex items-center gap-3 mb-6">
+                  <div className="p-3 rounded-xl bg-red-500/10 text-red-600">
+                    <LogOut className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h2 className="text-lg font-bold text-red-600">Sign Out</h2>
+                    <p className="text-sm text-theme-muted">End your current session.</p>
+                  </div>
+                </div>
+
+                <button
+                  onClick={async () => {
+                    const { supabase } = await import('@/lib/supabase')
+                    await supabase.auth.signOut()
+                    localStorage.clear()
+                    window.location.reload()
+                  }}
+                  className="btn-stunning bg-red-500 hover:bg-red-600 text-white px-6"
+                >
+                  <LogOut className="w-4 h-4" />
+                  Sign Out
                 </button>
               </div>
             </div>
@@ -763,28 +824,102 @@ export function SettingsScreen({ onBack }: SettingsScreenProps) {
 
                 <div className="space-y-3">
                   {staffList.map(staff => (
-                    <div key={staff.id} className="flex items-center justify-between p-4 bg-theme-ghost rounded-xl border border-theme-primary hover:border-theme-secondary transition-colors group">
-                      <div className="flex items-center gap-4">
-                        <div className={cn(
-                          "w-10 h-10 rounded-full flex items-center justify-center font-bold",
-                          staff.role === 'manager' ? "bg-purple-100 text-purple-600" :
-                            staff.role === 'chef' ? "bg-orange-100 text-orange-600" :
-                              "bg-zinc-100 text-zinc-600"
-                        )}>
-                          {staff.name.substring(0, 2).toUpperCase()}
+                    <div key={staff.id} className="p-4 bg-theme-ghost rounded-xl border border-theme-primary hover:border-theme-secondary transition-colors text-sm">
+                      {editingStaffId === staff.id ? (
+                        <div className="flex flex-col gap-3">
+                          <label className="text-xs font-semibold text-theme-muted uppercase">Editing Staff Member</label>
+                          <div className="flex flex-col sm:flex-row gap-2">
+                            <input
+                              value={editName}
+                              onChange={(e) => setEditName(e.target.value)}
+                              className="flex-1 px-3 py-2 bg-theme-bg border border-theme-primary rounded-lg focus:outline-none focus:border-emerald-500"
+                              placeholder="Name"
+                              autoFocus
+                            />
+                            <select
+                              value={editRole}
+                              onChange={(e) => setEditRole(e.target.value as any)}
+                              className="w-full sm:w-32 px-3 py-2 bg-theme-bg border border-theme-primary rounded-lg capitalize focus:outline-none focus:border-emerald-500"
+                            >
+                              <option value="staff">Staff</option>
+                              <option value="chef">Chef</option>
+                              <option value="manager">Manager</option>
+                            </select>
+                            <input
+                              value={editCode}
+                              onChange={(e) => setEditCode(e.target.value.replace(/[^0-9]/g, ''))}
+                              maxLength={4}
+                              className="w-full sm:w-24 px-3 py-2 bg-theme-bg border border-theme-primary rounded-lg text-center font-mono focus:outline-none focus:border-emerald-500"
+                              placeholder="Code"
+                            />
+                          </div>
+                          <div className="flex justify-end gap-2 mt-1">
+                            <button
+                              onClick={() => setEditingStaffId(null)}
+                              className="px-4 py-2 text-theme-muted hover:text-theme-primary text-xs font-medium"
+                            >
+                              Cancel
+                            </button>
+                            <button
+                              onClick={() => handleUpdateStaff(staff.id)}
+                              className="px-4 py-2 bg-emerald-500 text-white rounded-lg text-xs font-bold hover:bg-emerald-600 shadow-sm"
+                            >
+                              Save Changes
+                            </button>
+                          </div>
                         </div>
-                        <div>
-                          <h3 className="font-semibold">{staff.name}</h3>
-                          <p className="text-xs text-theme-muted capitalize">{staff.role}</p>
-                          <p className="text-xs text-theme-muted">Code: {staff.staff_code || '—'}</p>
+                      ) : (
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-4">
+                            <div className={cn(
+                              "w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm",
+                              staff.role === 'manager' ? "bg-purple-100 text-purple-600" :
+                                staff.role === 'chef' ? "bg-orange-100 text-orange-600" :
+                                  "bg-zinc-100 text-zinc-600"
+                            )}>
+                              {staff.name.substring(0, 2).toUpperCase()}
+                            </div>
+                            <div>
+                              <h3 className="font-semibold text-theme-primary flex items-center gap-2">
+                                {staff.name}
+                                <span className={cn(
+                                  "text-[10px] px-2 py-0.5 rounded-full uppercase font-bold tracking-wider",
+                                  staff.role === 'manager' ? "bg-purple-100 text-purple-600 dark:bg-purple-500/20 dark:text-purple-300" :
+                                    staff.role === 'chef' ? "bg-orange-100 text-orange-600 dark:bg-orange-500/20 dark:text-orange-300" :
+                                      "bg-zinc-100 text-zinc-600 dark:bg-zinc-500/20 dark:text-zinc-400"
+                                )}>
+                                  {staff.role}
+                                </span>
+                              </h3>
+                              <p className="text-xs text-theme-muted mt-0.5">
+                                Staff Code: <span className="font-mono text-theme-primary font-medium">{staff.staff_code || 'None'}</span>
+                              </p>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-1">
+                            <button
+                              onClick={() => {
+                                setEditingStaffId(staff.id)
+                                setEditName(staff.name)
+                                setEditRole(staff.role)
+                                setEditCode(staff.staff_code || '')
+                              }}
+                              className="p-2 text-theme-muted hover:text-sky-500 hover:bg-sky-500/10 rounded-lg transition-colors"
+                              title="Edit Staff Member"
+                            >
+                              <Edit2 className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => handleDeleteStaff(staff.id)}
+                              className="p-2 text-theme-muted hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-colors"
+                              title="Remove Staff Member"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
                         </div>
-                      </div>
-                      <button
-                        onClick={() => handleDeleteStaff(staff.id)}
-                        className="p-2 text-theme-muted hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors opacity-0 group-hover:opacity-100"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      )}
                     </div>
                   ))}
                 </div>

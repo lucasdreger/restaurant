@@ -143,6 +143,10 @@ interface AppState {
   // UI state
   kioskMode: boolean
   setKioskMode: (kiosk: boolean) => void
+  kioskLocked: boolean
+  activeStaffId: string | null
+  lockKiosk: () => void
+  unlockKiosk: (staffId: string) => void
 
   // Settings
   settings: AppSettings
@@ -288,6 +292,10 @@ export const useAppStore = create<AppState>()(
       // UI state
       kioskMode: true,
       setKioskMode: (kiosk) => set({ kioskMode: kiosk }),
+      kioskLocked: true, // Default to locked
+      activeStaffId: null,
+      lockKiosk: () => set({ kioskLocked: true, activeStaffId: null }),
+      unlockKiosk: (staffId) => set({ kioskLocked: false, activeStaffId: staffId }),
 
       // Settings
       settings: defaultSettings,
@@ -313,6 +321,8 @@ export const useAppStore = create<AppState>()(
         coolingSessions: state.coolingSessions,
         offlineQueue: state.offlineQueue,
         kioskMode: state.kioskMode,
+        activeStaffId: state.activeStaffId,
+        // Don't persist kioskLocked - always start locked on refresh for security
         settings: {
           ...state.settings,
           openaiApiKey: null,

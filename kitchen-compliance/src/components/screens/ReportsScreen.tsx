@@ -1,7 +1,7 @@
-import { 
-  ArrowLeft, 
-  BarChart3, 
-  TrendingUp, 
+import {
+  ArrowLeft,
+  BarChart3,
+  TrendingUp,
   TrendingDown,
   Calendar,
   Download,
@@ -15,6 +15,7 @@ import {
   Building2
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { toast } from 'sonner'
 
 interface ReportsScreenProps {
   onBack: () => void
@@ -47,38 +48,38 @@ const categoryBreakdown = [
 ]
 
 const performanceMetrics = [
-  { 
-    label: 'On-Time Completion', 
-    value: 94, 
-    change: +2.3, 
+  {
+    label: 'On-Time Completion',
+    value: 94,
+    change: +2.3,
     trend: 'up',
     icon: Clock,
-    color: 'text-green-500' 
+    color: 'text-green-500'
   },
-  { 
-    label: 'Avg Cooling Time', 
-    value: 78, 
+  {
+    label: 'Avg Cooling Time',
+    value: 78,
     unit: 'min',
-    change: -5.1, 
+    change: -5.1,
     trend: 'up',
     icon: ThermometerSnowflake,
-    color: 'text-blue-500' 
+    color: 'text-blue-500'
   },
-  { 
-    label: 'Waste Incidents', 
-    value: 3, 
-    change: -40, 
+  {
+    label: 'Waste Incidents',
+    value: 3,
+    change: -40,
     trend: 'down',
     icon: Trash2,
-    color: 'text-amber-500' 
+    color: 'text-amber-500'
   },
-  { 
-    label: 'Staff Compliance', 
-    value: 98, 
-    change: +1.5, 
+  {
+    label: 'Staff Compliance',
+    value: 98,
+    change: +1.5,
     trend: 'up',
     icon: CheckCircle2,
-    color: 'text-purple-500' 
+    color: 'text-purple-500'
   },
 ]
 
@@ -93,10 +94,25 @@ const topItems = [
 export function ReportsScreen({ onBack }: ReportsScreenProps) {
   const maxSessions = Math.max(...weeklyTrends.map(d => d.sessions))
 
+  const handleExportPDF = () => {
+    toast.info('Generating PDF report...', { icon: '📊' })
+    setTimeout(() => {
+      toast.success('Report "Kitchen_Compliance_Weekly.pdf" downloaded')
+    }, 1500)
+  }
+
+  const handleFilterClick = () => {
+    toast('Filter options coming soon', { icon: '🔍' })
+  }
+
+  const handleRangeClick = () => {
+    toast('Date range selection coming soon', { icon: '📅' })
+  }
+
   return (
     <div className="min-h-full bg-theme-primary text-theme-primary">
       {/* Header */}
-      <header className="sticky top-0 z-40 bg-glass-heavy border-b border-glass">
+      <header className="sticky-header bg-glass-heavy border-b border-glass">
         <div className="flex items-center justify-between px-4 lg:px-6 h-16">
           <div className="flex items-center gap-4">
             {/* Back button - only show on mobile/tablet */}
@@ -117,15 +133,24 @@ export function ReportsScreen({ onBack }: ReportsScreenProps) {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <button className="btn-stunning btn-ghost">
+            <button
+              onClick={handleRangeClick}
+              className="btn-stunning btn-ghost"
+            >
               <Calendar className="w-4 h-4" />
               Last 7 Days
             </button>
-            <button className="btn-stunning btn-ghost">
+            <button
+              onClick={handleFilterClick}
+              className="btn-stunning btn-ghost"
+            >
               <Filter className="w-4 h-4" />
               Filter
             </button>
-            <button className="btn-stunning btn-primary">
+            <button
+              onClick={handleExportPDF}
+              className="btn-stunning btn-primary"
+            >
               <Download className="w-4 h-4" />
               Export PDF
             </button>
@@ -225,21 +250,21 @@ export function ReportsScreen({ onBack }: ReportsScreenProps) {
                 </span>
               </div>
             </div>
-            
+
             {/* Bar Chart */}
             <div className="flex items-end justify-between gap-2 h-48">
               {weeklyTrends.map((day) => (
                 <div key={day.day} className="flex-1 flex flex-col items-center gap-2">
                   <div className="w-full flex flex-col items-center gap-1">
                     {/* Total bar */}
-                    <div 
+                    <div
                       className="w-full max-w-[40px] rounded-t-lg gradient-cool opacity-30"
                       style={{ height: `${(day.sessions / maxSessions) * 160}px` }}
                     />
                     {/* Compliant bar - overlaid */}
-                    <div 
+                    <div
                       className="w-full max-w-[32px] rounded-t-lg gradient-success -mt-1 relative"
-                      style={{ 
+                      style={{
                         height: `${(day.compliant / maxSessions) * 160}px`,
                         marginTop: `-${(day.sessions / maxSessions) * 160}px`
                       }}
@@ -266,7 +291,7 @@ export function ReportsScreen({ onBack }: ReportsScreenProps) {
                     </span>
                   </div>
                   <div className="h-2 bg-theme-ghost rounded-full overflow-hidden">
-                    <div 
+                    <div
                       className={cn('h-full rounded-full transition-all duration-500', cat.color)}
                       style={{ width: `${cat.percentage}%` }}
                     />
@@ -285,11 +310,11 @@ export function ReportsScreen({ onBack }: ReportsScreenProps) {
             <div className="grid grid-cols-2 gap-4">
               {performanceMetrics.map((metric, index) => {
                 const Icon = metric.icon
-                const isPositive = metric.trend === 'up' && metric.change > 0 || 
-                                   metric.trend === 'down' && metric.change < 0
-                
+                const isPositive = metric.trend === 'up' && metric.change > 0 ||
+                  metric.trend === 'down' && metric.change < 0
+
                 return (
-                  <div 
+                  <div
                     key={metric.label}
                     className={cn(
                       'card-stunning p-4 animate-scale-in',
@@ -336,7 +361,7 @@ export function ReportsScreen({ onBack }: ReportsScreenProps) {
             </div>
             <div className="space-y-3">
               {topItems.map((item, index) => (
-                <div 
+                <div
                   key={item.name}
                   className={cn(
                     'card-stunning p-4 animate-slide-up',

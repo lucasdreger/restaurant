@@ -167,6 +167,32 @@ export async function syncEventToSupabase(event: CoolingEvent): Promise<boolean>
   }
 }
 
+// Delete session from Supabase
+export async function syncDeleteToSupabase(sessionId: string): Promise<boolean> {
+  if (!isSupabaseConfigured()) {
+    console.log('Supabase not configured, skipping sync')
+    return false
+  }
+
+  try {
+    console.log(`🗑️ Attempting to delete session ${sessionId} from Supabase...`)
+    const { error } = await (supabase.from('cooling_sessions') as any)
+      .delete()
+      .eq('id', sessionId)
+
+    if (error) {
+      console.error('❌ Failed to delete session from Supabase (RLS?):', error)
+      throw error
+    }
+
+    console.log(`✅ Session ${sessionId} deleted from Supabase permanently.`)
+    return true
+  } catch (err) {
+    console.error('❌ Sync delete error:', err)
+    return false
+  }
+}
+
 // Fetch active sessions from Supabase
 export async function fetchActiveSessions(siteId: string): Promise<CoolingSession[]> {
   if (!isSupabaseConfigured()) {
@@ -419,10 +445,28 @@ export function useCoolingWorkflow() {
     })
   }
 
+  // Delete a cooling session
+  const deleteCooling = async (sessionId: string) => {
+    const session = coolingSessions.find((s) => s.id === sessionId)
+    if (!session || !currentSite) return false
+
+    // Update local store
+    const { removeCoolingSession } = useAppStore.getState()
+    removeCoolingSession(sessionId)
+
+    // Sync to Supabase if online
+    if (isOnline) {
+      await syncDeleteToSupabase(sessionId)
+    }
+
+    return true
+  }
+
   return {
     startCooling,
     closeCooling,
     discardCooling,
+    deleteCooling,
     addException,
     updateSessionStatuses,
     coolingSessions,
