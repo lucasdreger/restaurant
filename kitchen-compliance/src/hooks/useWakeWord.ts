@@ -308,7 +308,7 @@ export function useWakeWord(options: UseWakeWordOptions) {
           isInCommandModeRef.current = false
           startListening()
         }
-      }, 1000)
+      }, 100) // Reduced from 1000ms for faster response
     }
   }, [enabled, startListening])
 

@@ -132,7 +132,7 @@ export function HistoryScreen({ onBack }: HistoryScreenProps) {
   return (
     <div className="min-h-full bg-theme-primary text-theme-primary">
       {/* Header */}
-      <header className="safe-area-top bg-theme-header border-b border-theme-header sticky-header">
+      <header className="safe-area-top bg-theme-header border-b border-theme-header sticky top-0 lg:top-0 z-40">
         <div className="flex items-center justify-between px-4 py-3">
           <div className="flex items-center gap-3">
             {/* Back button - only show on mobile/tablet */}
@@ -151,7 +151,7 @@ export function HistoryScreen({ onBack }: HistoryScreenProps) {
         </div>
       </header>
 
-      <main className="p-4">
+      <main className="flex-1 overflow-y-auto p-4 pb-20 lg:pb-4">
         {/* Filters */}
         <div className="mb-6 space-y-3">
           {/* Date Filter */}

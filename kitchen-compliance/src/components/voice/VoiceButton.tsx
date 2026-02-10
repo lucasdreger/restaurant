@@ -35,20 +35,25 @@ export const VoiceButton = forwardRef<VoiceButtonHandle, VoiceButtonProps>(
     const { speak } = useTextToSpeech()
     const { settings } = useAppStore()
 
-    // Check if API key is available (for both command and conversation modes)
     const hasApiKey = !!(settings.openaiApiKey || settings.openrouterApiKey)
 
-    // Use API voice if OpenAI or OpenRouter is configured with API key
-    // For conversation mode: use Whisper if API key available (browser speech is broken)
-    const useWhisper = hasApiKey && (
-      !conversationMode || (conversationMode && hasApiKey)
-    )
+    // Use Whisper if explicitly selected AND API key exists
+    const isWhisperSelected = settings.voiceProvider === 'openai' || settings.voiceProvider === 'openrouter'
 
-    const providerLabel = settings.voiceProvider === 'openai'
-      ? 'OpenAI Whisper'
-      : settings.voiceProvider === 'openrouter'
-        ? `OpenRouter (${settings.audioModel?.split('/')[1] || 'gpt-audio-mini'})`
-        : 'Browser'
+    // Automatic fallback logic: Use Whisper only if selected AND has key. 
+    // If Whisper is selected but NO key, useWhisper becomes false and it falls back to browser.
+    const useWhisper = isWhisperSelected && hasApiKey
+
+    // Detect if we are in a fallback state (Whisper requested but not configured)
+    const isFallingBack = isWhisperSelected && !hasApiKey
+
+    const providerLabel = isFallingBack
+      ? `Browser (Fallback from ${settings.voiceProvider})`
+      : settings.voiceProvider === 'openai'
+        ? 'OpenAI Whisper'
+        : settings.voiceProvider === 'openrouter'
+          ? `OpenRouter (${settings.audioModel?.split('/')[1] || 'gpt-audio-mini'})`
+          : 'Browser'
 
     // DEBUG: Log voice provider selection
     useEffect(() => {
@@ -59,10 +64,11 @@ export const VoiceButton = forwardRef<VoiceButtonHandle, VoiceButtonProps>(
       console.log('[VoiceButton] settings.audioModel:', settings.audioModel)
       console.log('[VoiceButton] hasApiKey:', hasApiKey)
       console.log('[VoiceButton] useWhisper (API voice):', useWhisper)
+      console.log('[VoiceButton] isFallingBack:', isFallingBack)
       console.log('[VoiceButton] conversationMode:', conversationMode)
       console.log('[VoiceButton] Provider in use:', providerLabel)
       console.log('[VoiceButton] =================================')
-    }, [settings.voiceProvider, settings.openaiApiKey, settings.openrouterApiKey, settings.audioModel, useWhisper, hasApiKey, conversationMode, providerLabel])
+    }, [settings.voiceProvider, settings.openaiApiKey, settings.openrouterApiKey, settings.audioModel, useWhisper, hasApiKey, isFallingBack, conversationMode, providerLabel])
 
     // Handle command with voice feedback - defined early so hooks can use it
     const handleCommand = useCallback((command: VoiceCommand) => {
