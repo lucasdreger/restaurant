@@ -8,6 +8,7 @@ import { fsaiStaffTrainingSchema } from '@/components/haccp/schemas/fsai_staff_t
 import type { ComplianceLogData, ComplianceSchema } from '@/components/haccp/types'
 import { saveComplianceLog } from '@/services/complianceService'
 import { useAppStore } from '@/store/useAppStore'
+import { GlassCard } from '@/components/ui/GlassCard'
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { toast } from 'sonner'
@@ -179,22 +180,22 @@ export function ComplianceScreen({ onBack }: ComplianceScreenProps) {
           </button>
           <div>
             <h1 className="text-3xl font-light tracking-tight">New Entry</h1>
-            <p className="text-theme-muted font-light">Compliance Log • {activeSchema.region}</p>
+            <p className="text-theme-muted font-light text-sm uppercase tracking-wide">Compliance Log • {activeSchema.region}</p>
           </div>
         </div>
 
-        <div className="card-stunning p-6">
+        <GlassCard variant="heavy" className="p-8">
           <SchemaRenderer
             schema={activeSchema}
             onSave={handleLogSave}
           />
-        </div>
+        </GlassCard>
       </div>
     )
   }
 
   const getScoreColor = (score: number) => {
-    if (score >= 95) return 'text-green-500'
+    if (score >= 95) return 'text-emerald-500'
     if (score >= 80) return 'text-amber-500'
     return 'text-red-500'
   }
@@ -203,7 +204,7 @@ export function ComplianceScreen({ onBack }: ComplianceScreenProps) {
     <div className="min-h-full bg-theme-primary text-theme-primary transition-colors duration-300">
 
       {/* Header */}
-      <div className="sticky-header bg-glass-heavy border-b border-theme-primary p-4 md:p-6 backdrop-blur-md">
+      <div className="sticky-header bg-glass-heavy border-b border-theme-primary p-4 md:p-8 backdrop-blur-xl">
         <div className="max-w-7xl mx-auto flex flex-col md:flex-row md:items-center justify-between gap-6">
           <div className="flex items-center gap-4">
             {/* Back button - only show on mobile/tablet */}
@@ -214,12 +215,12 @@ export function ComplianceScreen({ onBack }: ComplianceScreenProps) {
               <ArrowLeft className="w-6 h-6" />
             </button>
             <div>
-              <h1 className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-theme-primary to-theme-secondary">
+              <h1 className="text-3xl font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-theme-primary via-teal-500 to-theme-secondary">
                 Compliance
               </h1>
-              <div className="flex items-center gap-2 mt-1">
-                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                <p className="text-theme-muted font-medium text-xs uppercase tracking-wider">Live Monitoring</p>
+              <div className="flex items-center gap-2 mt-1.5">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.5)]"></span>
+                <p className="text-theme-muted font-bold text-[10px] uppercase tracking-[0.1em]">Executive Audit Mode</p>
               </div>
             </div>
           </div>
@@ -228,207 +229,243 @@ export function ComplianceScreen({ onBack }: ComplianceScreenProps) {
             <button
               onClick={handleExportPDF}
               disabled={isExporting}
-              className="btn-stunning btn-ghost flex items-center gap-2"
+              className="btn-stunning btn-ghost flex items-center gap-2 px-6 py-3 border border-theme-secondary"
             >
               <Download size={18} />
-              {isExporting ? 'Generating...' : 'Export Report'}
+              <span className="font-semibold">{isExporting ? 'Generating...' : 'Export PDF Report'}</span>
             </button>
             <button
               onClick={() => handleOpenSchema(fsaiFridgeTempSchema)}
-              className="btn-stunning btn-primary flex items-center gap-2"
+              className="btn-stunning btn-primary flex items-center gap-2 px-6 py-3 shadow-lg shadow-teal-500/20"
             >
               <Plus size={18} />
-              New Log Entry
+              <span className="font-semibold">New Log Entry</span>
             </button>
           </div>
         </div>
       </div>
 
-      <div className="p-6 md:p-10 max-w-7xl mx-auto space-y-10 pb-24">
+      <div className="p-6 md:p-12 max-w-7xl mx-auto space-y-12 pb-24">
 
         {/* Quick Actions / Schema Selection */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-          <button
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <GlassCard
             onClick={() => handleOpenSchema(fsaiFridgeTempSchema)}
-            className="p-4 text-left card-stunning hover:border-theme-secondary transition-colors group"
+            variant="interactive"
+            className="p-6 group border-l-4 border-l-blue-500/40"
           >
-            <div className="flex items-center gap-3 mb-2">
-              <div className="p-2 bg-blue-500/10 text-blue-500 rounded-lg group-hover:bg-blue-500 group-hover:text-white transition-colors">
-                <Thermometer size={20} />
+            <div className="flex items-center gap-4 mb-3">
+              <div className="p-3 bg-blue-500/10 text-blue-500 rounded-xl group-hover:bg-blue-500 group-hover:text-white transition-all duration-300">
+                <Thermometer size={24} />
               </div>
-              <span className="font-semibold">Temperature Log</span>
+              <div>
+                <span className="font-bold text-lg tracking-tight">Temperature Log</span>
+                <p className="text-xs text-theme-muted mt-0.5">Fridges & Freezers</p>
+              </div>
             </div>
-            <p className="text-sm text-theme-muted">Fridges, Freezers & Blast Chillers</p>
-          </button>
+          </GlassCard>
 
-          <button
+          <GlassCard
             onClick={() => handleOpenSchema(fsaiDailyCleaningSchema)}
-            className="p-4 text-left card-stunning hover:border-theme-secondary transition-colors group"
+            variant="interactive"
+            className="p-6 group border-l-4 border-l-emerald-500/40"
           >
-            <div className="flex items-center gap-3 mb-2">
-              <div className="p-2 bg-emerald-500/10 text-emerald-500 rounded-lg group-hover:bg-emerald-500 group-hover:text-white transition-colors">
-                <Sparkles size={20} />
+            <div className="flex items-center gap-4 mb-3">
+              <div className="p-3 bg-emerald-500/10 text-emerald-500 rounded-xl group-hover:bg-emerald-500 group-hover:text-white transition-all duration-300">
+                <Sparkles size={24} />
               </div>
-              <span className="font-semibold">Cleaning Schedule</span>
+              <div>
+                <span className="font-bold text-lg tracking-tight">Cleaning Schedule</span>
+                <p className="text-xs text-theme-muted mt-0.5">Hygiene Verification</p>
+              </div>
             </div>
-            <p className="text-sm text-theme-muted">Daily, Weekly & Deep Clean Tasks</p>
-          </button>
+          </GlassCard>
 
-          <button
+          <GlassCard
             onClick={() => handleOpenSchema(fsaiStaffTrainingSchema)}
-            className="p-4 text-left card-stunning hover:border-theme-secondary transition-colors group"
+            variant="interactive"
+            className="p-6 group border-l-4 border-l-purple-500/40"
           >
-            <div className="flex items-center gap-3 mb-2">
-              <div className="p-2 bg-purple-500/10 text-purple-500 rounded-lg group-hover:bg-purple-500 group-hover:text-white transition-colors">
-                <UsersIcon size={20} />
+            <div className="flex items-center gap-4 mb-3">
+              <div className="p-3 bg-purple-500/10 text-purple-500 rounded-xl group-hover:bg-purple-500 group-hover:text-white transition-all duration-300">
+                <UsersIcon size={24} />
               </div>
-              <span className="font-semibold">Staff Training</span>
+              <div>
+                <span className="font-bold text-lg tracking-tight">Staff Training</span>
+                <p className="text-xs text-theme-muted mt-0.5">Certificates & Compliance</p>
+              </div>
             </div>
-            <p className="text-sm text-theme-muted">Induction & Allergen Certs</p>
-          </button>
+          </GlassCard>
         </div>
 
-        {/* Stats Grid - "Apple clean" style */}
+        {/* Stats Grid - "Executive" style */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
           {/* Overall Score */}
-          <div className="card-stunning p-6 flex flex-col justify-between h-40 group">
+          <GlassCard className="p-8 flex flex-col justify-between h-44 group" glow>
             <div>
-              <h3 className="text-xs font-bold text-theme-muted uppercase tracking-wider">Overall Score</h3>
+              <h3 className="text-[10px] font-bold text-theme-muted uppercase tracking-[0.15em] mb-1">Global Health Index</h3>
+              <p className="text-xs text-theme-muted font-medium">Real-time status</p>
             </div>
             <div className="flex items-end justify-between">
-              <span className="text-5xl font-light tracking-tighter text-theme-primary">
-                {complianceMetrics.overallScore}%
+              <span className="text-6xl font-extralight tracking-tighter text-theme-primary">
+                {complianceMetrics.overallScore}<span className="text-2xl font-normal opacity-40 ml-1">%</span>
               </span>
-              <TrendingUp className="w-6 h-6 text-emerald-500 mb-2 group-hover:scale-110 transition-transform" />
+              <div className="p-2 bg-emerald-500/10 rounded-lg mb-2">
+                <TrendingUp className="w-5 h-5 text-emerald-500 group-hover:scale-110 transition-transform" />
+              </div>
             </div>
-          </div>
+          </GlassCard>
 
           {/* Cooling */}
-          <div className="card-stunning p-6 flex flex-col justify-between h-40 group">
+          <GlassCard className="p-8 flex flex-col justify-between h-44 group" glow>
             <div>
-              <h3 className="text-xs font-bold text-theme-muted uppercase tracking-wider">Cooling Safety</h3>
+              <h3 className="text-[10px] font-bold text-theme-muted uppercase tracking-[0.15em] mb-1">Critical Cooling</h3>
+              <p className="text-xs text-theme-muted font-medium">SC3 Verification</p>
             </div>
             <div className="flex items-end justify-between">
-              <span className="text-5xl font-light tracking-tighter text-theme-primary">
-                {complianceMetrics.coolingCompliance}%
+              <span className="text-6xl font-extralight tracking-tighter text-theme-primary">
+                {complianceMetrics.coolingCompliance}<span className="text-2xl font-normal opacity-40 ml-1">%</span>
               </span>
-              <Shield className="w-6 h-6 text-blue-500 mb-2 group-hover:scale-110 transition-transform" />
+              <div className="p-2 bg-blue-500/10 rounded-lg mb-2">
+                <Shield className="w-5 h-5 text-blue-500 group-hover:scale-110 transition-transform" />
+              </div>
             </div>
-          </div>
+          </GlassCard>
 
           {/* Audit Status */}
-          <div className="card-stunning p-6 flex flex-col justify-between h-40 group">
+          <GlassCard className="p-8 flex flex-col justify-between h-44 group">
             <div>
-              <h3 className="text-xs font-bold text-theme-muted uppercase tracking-wider">Next Audit</h3>
-              <p className="text-xs text-theme-muted mt-1">Scheduled Inspection</p>
+              <h3 className="text-[10px] font-bold text-theme-muted uppercase tracking-[0.15em] mb-1">Next Inspection</h3>
+              <p className="text-xs text-theme-muted font-medium">Internal Audit Window</p>
             </div>
             <div className="flex items-end justify-between">
-              <span className="text-2xl font-light text-theme-primary">
+              <span className="text-3xl font-light tracking-tight text-theme-primary">
                 Feb 15
               </span>
-              <Calendar className="w-6 h-6 text-theme-muted mb-2" />
+              <div className="p-2 bg-theme-ghost rounded-lg mb-1">
+                <Calendar className="w-5 h-5 text-theme-muted" />
+              </div>
             </div>
-          </div>
+          </GlassCard>
 
           {/* Actions Required */}
-          <div className="p-6 rounded-2xl border border-red-500/20 bg-red-500/5 shadow-sm flex flex-col justify-between h-40">
+          <GlassCard className="p-8 flex flex-col justify-between h-44 border-red-500/20 bg-red-500/5" glow>
             <div>
-              <h3 className="text-xs font-bold text-red-500 uppercase tracking-wider">Action Needed</h3>
+              <h3 className="text-[10px] font-bold text-red-500 uppercase tracking-[0.15em] mb-1">Risk Alerts</h3>
+              <p className="text-xs text-red-500/60 font-medium font-mono">NEEDS ATTENTION</p>
             </div>
             <div className="flex items-end justify-between">
-              <span className="text-4xl font-light tracking-tighter text-red-500">
+              <span className="text-6xl font-extralight tracking-tighter text-red-500">
                 3
               </span>
-              <div className="px-3 py-1 bg-red-500 text-white rounded-full text-xs font-bold">
+              <div className="px-3 py-1 bg-red-500 text-white rounded-full text-[10px] font-bold tracking-widest shadow-lg shadow-red-500/20 mb-2">
                 URGENT
               </div>
             </div>
-          </div>
+          </GlassCard>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-10">
           {/* Main Content - Checklist */}
-          <div className="lg:col-span-2 space-y-6">
-            <h2 className="text-xl font-light tracking-tight text-theme-primary flex items-center gap-2">
-              <ClipboardCheck className="w-5 h-5 text-theme-muted" />
-              Daily Tasks
-            </h2>
+          <div className="lg:col-span-2 space-y-8">
+            <div className="flex items-center justify-between">
+              <h2 className="text-2xl font-light tracking-tight text-theme-primary flex items-center gap-3">
+                <ClipboardCheck className="w-6 h-6 text-teal-500" />
+                Outstanding SOP
+              </h2>
+              <span className="text-[10px] font-bold text-theme-muted uppercase tracking-[0.2em]">Operational Excellence</span>
+            </div>
 
-            <div className="space-y-3">
+            <div className="grid grid-cols-1 gap-4">
               {complianceChecklist.map((item) => (
-                <div
+                <GlassCard
                   key={item.id}
-                  className="group card-stunning p-4 cursor-pointer flex items-center justify-between hover:scale-[1.01] transition-transform"
+                  variant="interactive"
+                  className="p-5 flex items-center justify-between group"
                 >
-                  <div className="flex items-center gap-4">
+                  <div className="flex items-center gap-5">
                     <div className={cn(
-                      "w-10 h-10 rounded-full flex items-center justify-center transition-colors",
+                      "w-12 h-12 rounded-2xl flex items-center justify-center transition-all duration-300 shadow-sm",
                       item.status === 'complete'
-                        ? "bg-emerald-500/10 text-emerald-500"
+                        ? "bg-emerald-500/20 text-emerald-500 shadow-emerald-500/10"
                         : "bg-theme-ghost text-theme-muted"
                     )}>
-                      {item.status === 'complete' ? <CheckCircle2 size={20} /> : <Clock size={20} />}
+                      {item.status === 'complete' ? <CheckCircle2 size={24} /> : <Clock size={24} />}
                     </div>
                     <div>
-                      <h3 className="font-medium text-theme-primary">{item.category}</h3>
-                      <p className="text-sm text-theme-muted">
-                        {item.completed}/{item.items} verified
-                      </p>
+                      <h3 className="font-bold text-lg text-theme-primary tracking-tight">{item.category}</h3>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <p className="text-xs text-theme-muted">
+                          <span className="font-bold text-theme-primary">{item.completed}</span> / {item.items} verified
+                        </p>
+                        <span className="w-1 h-1 rounded-full bg-theme-muted opacity-30" />
+                        <p className="text-[10px] uppercase font-bold tracking-wider text-theme-muted">
+                          {item.status === 'complete' ? 'COMPLIANT' : 'PENDING'}
+                        </p>
+                      </div>
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-4">
+                  <div className="flex items-center gap-6">
                     {/* Progress Bar */}
-                    <div className="w-24 h-1.5 bg-theme-ghost rounded-full overflow-hidden">
+                    <div className="hidden sm:block w-32 h-2 bg-theme-ghost rounded-full overflow-hidden border border-theme-primary/10">
                       <div
-                        className="h-full bg-theme-primary rounded-full"
+                        className={cn(
+                          "h-full rounded-full transition-all duration-1000 ease-out",
+                          item.status === 'complete' ? "bg-emerald-500" : "bg-teal-500"
+                        )}
                         style={{ width: `${(item.completed / item.items) * 100}%` }}
                       />
                     </div>
-                    <ArchiveIcon className="w-4 h-4 text-theme-muted opacity-0 group-hover:opacity-100 transition-opacity" />
+                    <ArchiveIcon className="w-5 h-5 text-theme-muted opacity-0 group-hover:opacity-100 transition-all duration-300 transform group-hover:scale-110" />
                   </div>
-                </div>
+                </GlassCard>
               ))}
             </div>
           </div>
 
           {/* Sidebar - Recent Audits */}
-          <div className="space-y-6">
-            <h2 className="text-xl font-light tracking-tight text-theme-primary flex items-center gap-2">
-              <FileText className="w-5 h-5 text-theme-muted" />
-              Recent Logs
+          <div className="space-y-8">
+            <h2 className="text-2xl font-light tracking-tight text-theme-primary flex items-center gap-3">
+              <FileText className="w-6 h-6 text-theme-muted" />
+              Audit Logs
             </h2>
 
-            <div className="bg-theme-ghost rounded-2xl p-1 border border-theme-primary">
-              {recentAudits.map((audit) => (
-                <div
-                  key={audit.id}
-                  className="p-4 hover:bg-theme-card rounded-xl transition-colors border-b border-theme-ghost last:border-0"
-                >
-                  <div className="flex justify-between items-start mb-1">
-                    <span className="font-medium text-theme-primary">{audit.type}</span>
-                    <span className={cn(
-                      "text-xs font-bold px-2 py-0.5 rounded-full uppercase",
-                      audit.status === 'passed' ? "bg-emerald-500/10 text-emerald-600" :
-                        "bg-amber-500/10 text-amber-600"
-                    )}>
-                      {audit.status === 'action-needed' ? 'Action' : 'Pass'}
-                    </span>
-                  </div>
-                  <div className="flex justify-between items-end">
-                    <span className="text-xs text-theme-muted">{audit.date}</span>
-                    <div className="text-right">
+            <GlassCard variant="heavy" className="p-2">
+              <div className="space-y-1">
+                {recentAudits.map((audit) => (
+                  <div
+                    key={audit.id}
+                    className="p-5 hover:bg-white/5 rounded-2xl transition-all duration-200 border-b border-white/5 last:border-0 group cursor-pointer"
+                  >
+                    <div className="flex justify-between items-start mb-2">
+                      <span className="font-bold text-theme-primary group-hover:text-teal-500 transition-colors uppercase text-[11px] tracking-wider">{audit.type}</span>
                       <span className={cn(
-                        "font-bold",
-                        getScoreColor(audit.score)
+                        "text-[9px] font-black px-2 py-0.5 rounded-md tracking-tighter",
+                        audit.status === 'passed' ? "bg-emerald-500/10 text-emerald-500" :
+                          "bg-amber-500/10 text-amber-500"
                       )}>
-                        {audit.score}%
+                        {audit.status === 'action-needed' ? 'ALERT' : 'PASS'}
                       </span>
                     </div>
+                    <div className="flex justify-between items-end">
+                      <div className="flex items-center gap-2">
+                        <Calendar size={12} className="text-theme-muted" />
+                        <span className="text-[10px] font-medium text-theme-muted">{audit.date}</span>
+                      </div>
+                      <div className="text-right">
+                        <span className={cn(
+                          "font-bold text-xl tracking-tighter",
+                          getScoreColor(audit.score)
+                        )}>
+                          {audit.score}<span className="text-xs ml-0.5 opacity-50">%</span>
+                        </span>
+                      </div>
+                    </div>
                   </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            </GlassCard>
           </div>
         </div>
       </div>
