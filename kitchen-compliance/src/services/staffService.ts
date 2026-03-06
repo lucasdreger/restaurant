@@ -47,15 +47,32 @@ export const deleteStaffMember = async (id: string) => {
     if (error) throw error
 }
 
-export const verifyPin = async (siteId: string, pin: string) => {
-    const { data, error } = await supabase
-        .from('staff_members')
-        .select('*')
-        .eq('site_id', siteId)
-        .eq('pin', pin)
-        .eq('active', true)
-        .maybeSingle()
+/**
+ * Verify a staff PIN securely via Edge Function.
+ * PINs are hashed with bcrypt server-side — never compared in plaintext.
+ */
+export const verifyPin = async (siteId: string, pin: string): Promise<StaffMember | null> => {
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session) throw new Error('Not authenticated')
 
-    if (error) throw error
-    return data as StaffMember | null
+    const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/verify-pin`,
+        {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${session.access_token}`,
+                'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
+            },
+            body: JSON.stringify({ siteId, pin }),
+        }
+    )
+
+    if (!response.ok) {
+        const err = await response.json().catch(() => ({ error: 'Unknown error' }))
+        throw new Error(err.error || 'PIN verification failed')
+    }
+
+    const result = await response.json()
+    return result.staff as StaffMember | null
 }

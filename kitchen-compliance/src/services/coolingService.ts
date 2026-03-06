@@ -4,6 +4,8 @@ import type { CoolingSession, CoolingEvent, FoodItemPreset, Alert, CloseCoolingD
 import type { Json } from '@/types/database.types'
 import { COOLING_POLICY, getCoolingStatus, type CoolingStatus } from '@/lib/utils'
 import { supabase, isSupabaseConfigured } from '@/lib/supabase'
+import { useQueryClient } from '@tanstack/react-query'
+import { COOLING_KEYS, useCoolingSessions } from '@/hooks/queries/useCooling'
 
 const mapCoolingSessionRow = (row: any): CoolingSession => ({
   id: row.id,
@@ -243,15 +245,16 @@ export async function fetchCoolingSessions(siteId: string): Promise<CoolingSessi
 
 // Cooling workflow hook
 export function useCoolingWorkflow() {
+  const queryClient = useQueryClient()
   const {
-    coolingSessions,
-    addCoolingSession,
-    updateCoolingSession,
     addAlert,
     addToOfflineQueue,
     currentSite,
     isOnline,
   } = useAppStore()
+
+  // Use React Query for session data
+  const { data: coolingSessions = [] } = useCoolingSessions(currentSite?.id)
 
   // Start a new cooling session
   const startCooling = async (
@@ -269,8 +272,8 @@ export function useCoolingWorkflow() {
       currentSite.id
     )
 
-    // Add to local store
-    addCoolingSession(session)
+    // Optimistic update
+    queryClient.setQueryData(COOLING_KEYS.active(currentSite.id), (old: CoolingSession[] = []) => [session, ...old])
 
     // Create start event
     const event = createCoolingEvent(session.id, currentSite.id, 'started', {
@@ -282,8 +285,10 @@ export function useCoolingWorkflow() {
     if (isOnline) {
       const synced = await syncSessionToSupabase(session)
       if (synced) {
-        updateCoolingSession(session.id, { synced: true })
+        // No need to update 'synced' prop locally if we invalidate, but for immediate consistency:
+        // We could update the cache item to set synced=true, but invalidation is safer.
         await syncEventToSupabase(event)
+        queryClient.invalidateQueries({ queryKey: COOLING_KEYS.active(currentSite.id) })
       }
     } else {
       // Queue for later sync when offline
@@ -314,8 +319,10 @@ export function useCoolingWorkflow() {
       closed_by: closeData?.staffName,
     }
 
-    // Update local store
-    updateCoolingSession(sessionId, updates)
+    // Optimistic update
+    queryClient.setQueryData(COOLING_KEYS.active(currentSite.id), (old: CoolingSession[] = []) =>
+      old.map(s => s.id === sessionId ? { ...s, ...updates } : s)
+    )
 
     // Create close event with temperature and staff data
     const event = createCoolingEvent(sessionId, currentSite.id, 'closed', {
@@ -331,8 +338,8 @@ export function useCoolingWorkflow() {
     if (isOnline) {
       const synced = await syncSessionToSupabase({ ...session, ...updates })
       if (synced) {
-        updateCoolingSession(sessionId, { synced: true })
         await syncEventToSupabase(event)
+        queryClient.invalidateQueries({ queryKey: COOLING_KEYS.active(currentSite.id) })
       }
     } else {
       addToOfflineQueue(event)
@@ -355,8 +362,10 @@ export function useCoolingWorkflow() {
       exception_reason: reason,
     }
 
-    // Update local store
-    updateCoolingSession(sessionId, updates)
+    // Optimistic update
+    queryClient.setQueryData(COOLING_KEYS.active(currentSite.id), (old: CoolingSession[] = []) =>
+      old.map(s => s.id === sessionId ? { ...s, ...updates } : s)
+    )
 
     // Create discard event
     const event = createCoolingEvent(sessionId, currentSite.id, 'discarded', {
@@ -370,8 +379,8 @@ export function useCoolingWorkflow() {
     if (isOnline) {
       const synced = await syncSessionToSupabase({ ...session, ...updates })
       if (synced) {
-        updateCoolingSession(sessionId, { synced: true })
         await syncEventToSupabase(event)
+        queryClient.invalidateQueries({ queryKey: COOLING_KEYS.active(currentSite.id) })
       }
     } else {
       addToOfflineQueue(event)
@@ -399,8 +408,10 @@ export function useCoolingWorkflow() {
       exception_approved_by: approvedBy,
     }
 
-    // Update local store
-    updateCoolingSession(sessionId, updates)
+    // Optimistic update
+    queryClient.setQueryData(COOLING_KEYS.active(currentSite.id), (old: CoolingSession[] = []) =>
+      old.map(s => s.id === sessionId ? { ...s, ...updates } : s)
+    )
 
     // Create exception event
     const event = createCoolingEvent(sessionId, currentSite.id, 'exception_added', {
@@ -415,8 +426,9 @@ export function useCoolingWorkflow() {
     if (isOnline) {
       const synced = await syncSessionToSupabase({ ...session, ...updates })
       if (synced) {
-        updateCoolingSession(sessionId, { synced: true })
         await syncEventToSupabase(event)
+        // No explicit invalidation needed here if optimistic update is enough, but safest to invalidate
+        queryClient.invalidateQueries({ queryKey: COOLING_KEYS.active(currentSite.id) })
       }
     } else {
       addToOfflineQueue(event)
@@ -427,13 +439,35 @@ export function useCoolingWorkflow() {
 
   // Check and update session statuses (called periodically)
   const updateSessionStatuses = () => {
+    // With React Query, we can update the cache directly or force a refetch.
+    // Since calculating status is cheap and doesn't change data on server unless we save it,
+    // we should just check and trigger alerts here.
+    // If status changes (e.g. warning -> overdue), we assume the UI calculates it on render,
+    // but if we need to SAVE the status change to DB, we should do it.
+    // However, status is usually derived from timestamps.
+    // The previous logic saved status updates to local store.
+    // Let's just update alerts here. Status saving is implicit/not strictly needed if derived from time.
+    // BUT the previous implementation DID save it.
+    // For now, let's just emit alerts. React Query data is "truth".
+    // If we want to persist status changes to DB, we'd need a mutation.
+
     coolingSessions.forEach((session) => {
       if (session.closed_at) return // Skip closed sessions
 
       const currentStatus = getCoolingStatus(new Date(session.started_at))
 
       if (currentStatus !== session.status) {
-        updateCoolingSession(session.id, { status: currentStatus })
+        // Status changed.
+        // If we want to persist this status change:
+        // updateCoolingSession(session.id, { status: currentStatus }) -> converted to DB update?
+        // Actually, status in DB is useful for querying. Use specific update fn?
+        // Since this runs every 10s, we don't want to spam DB.
+        // Maybe only locally update the cache?
+
+        // Optimistic update of status in cache only
+        queryClient.setQueryData(COOLING_KEYS.active(currentSite?.id), (old: CoolingSession[] = []) =>
+          old.map(s => s.id === session.id ? { ...s, status: currentStatus } : s)
+        )
 
         // Create alert for status changes
         if (currentStatus === 'warning' && session.status === 'active') {
@@ -450,13 +484,15 @@ export function useCoolingWorkflow() {
     const session = coolingSessions.find((s) => s.id === sessionId)
     if (!session || !currentSite) return false
 
-    // Update local store
-    const { removeCoolingSession } = useAppStore.getState()
-    removeCoolingSession(sessionId)
+    // Optimistic delete
+    queryClient.setQueryData(COOLING_KEYS.active(currentSite.id), (old: CoolingSession[] = []) =>
+      old.filter(s => s.id !== sessionId)
+    )
 
     // Sync to Supabase if online
     if (isOnline) {
       await syncDeleteToSupabase(sessionId)
+      queryClient.invalidateQueries({ queryKey: COOLING_KEYS.active(currentSite.id) })
     }
 
     return true

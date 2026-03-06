@@ -8,8 +8,6 @@ export interface SiteSettingsPayload {
   language?: string | null
   voice_provider?: string | null
   audio_model?: string | null
-  openai_api_key?: string | null
-  openrouter_api_key?: string | null
   ocr_provider?: string | null
   ocr_model?: string | null
   tts_enabled?: boolean | null
@@ -24,8 +22,6 @@ export interface SiteSettingsRecord {
   language: string | null
   voice_provider: string | null
   audio_model: string | null
-  openai_api_key: string | null
-  openrouter_api_key: string | null
   ocr_provider: string | null
   ocr_model: string | null
   tts_enabled: boolean | null

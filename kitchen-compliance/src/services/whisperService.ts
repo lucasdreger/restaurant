@@ -1,18 +1,15 @@
 /**
  * Voice Recognition Service
+ * 
+ * All AI transcription is proxied through the Supabase Edge Function `ai-proxy`.
+ * API keys are stored server-side as Supabase secrets — never exposed to the client.
+ * 
  * Supports:
- * - OpenAI Whisper API (direct transcription endpoint)
- * - OpenRouter Audio Models (chat completions with audio input)
+ * - OpenAI Whisper (via Edge Function)
+ * - Browser Speech Recognition (free, no API key needed)
  */
 
-import type { AudioModel } from '@/store/useAppStore'
-
-interface VoiceConfig {
-  apiKey: string
-  provider: 'openai' | 'openrouter'
-  model?: AudioModel // For OpenRouter
-  language?: string
-}
+import { isSupabaseConfigured, supabase } from '@/lib/supabase'
 
 interface TranscriptionResult {
   text: string
@@ -78,6 +75,7 @@ export class AudioRecorder {
 
     const bufferLength = analyser.frequencyBinCount
     const dataArray = new Uint8Array(bufferLength)
+    let heardSpeech = false
 
     const checkSilence = () => {
       if (!this.isRecording) {
@@ -89,13 +87,24 @@ export class AudioRecorder {
       const volume = dataArray.reduce((a, b) => a + b) / bufferLength
 
       // Threshold for silence (very low amplitude)
-      if (volume < 5) { // Adjusted for noise
+      //
+      // IMPORTANT: only start the "post-speech" silence timer after we have heard
+      // non-trivial audio. Otherwise quickResponseMode would auto-stop before the user
+      // even answers (initial silence).
+      const SILENCE_THRESHOLD = 5 // Tuned for kitchen background noise
+      if (volume >= SILENCE_THRESHOLD) {
+        heardSpeech = true
+      }
+
+      if (heardSpeech && volume < SILENCE_THRESHOLD) {
         if (!this.silenceTimer) {
-          const silenceDelay = this.quickResponseMode ? 400 : 700 // Quick: 400ms, Normal: 700ms
-      this.silenceTimer = setTimeout(() => {
+          // Quick answers (staff code / temperature) still need enough time for
+          // pauses like "one point five", so keep this conservative.
+          const silenceDelay = this.quickResponseMode ? 900 : 1200
+          this.silenceTimer = setTimeout(() => {
             console.log('[Voice] Silence detected, auto-stopping...')
             this.onSilenceDetected?.()
-      }, silenceDelay)
+          }, silenceDelay)
         }
       } else {
         if (this.silenceTimer) {
@@ -152,7 +161,6 @@ export class AudioRecorder {
   }
 
   private getSupportedMimeType(): string {
-    // Try different formats - webm is most common
     const types = [
       'audio/webm;codecs=opus',
       'audio/webm',
@@ -186,232 +194,148 @@ async function blobToBase64(blob: Blob): Promise<string> {
   })
 }
 
-// OpenAI Whisper API client (direct transcription)
-class WhisperClient {
-  private apiKey: string
-  private language: string
-
-  constructor(apiKey: string, language = 'en') {
-    this.apiKey = apiKey
-    this.language = language
+/**
+ * Transcribe audio via the ai-proxy Edge Function.
+ * No API keys needed on the client — server-side secrets are used.
+ */
+async function transcribeViaEdgeFunction(
+  audioBlob: Blob,
+  language: string = 'en',
+  siteId?: string
+): Promise<TranscriptionResult> {
+  if (!isSupabaseConfigured()) {
+    throw new Error('Supabase is not configured')
   }
 
-  async transcribe(audioBlob: Blob): Promise<TranscriptionResult> {
-    const formData = new FormData()
+  const audioBase64 = await blobToBase64(audioBlob)
+  console.log('[Voice] Sending audio to Edge Function for transcription')
 
-    // Convert blob to file with proper extension
-    const extension = this.getExtensionFromMimeType(audioBlob.type)
-    const audioFile = new File([audioBlob], `audio.${extension}`, { type: audioBlob.type })
+  const requestBody = {
+    action: 'transcribe',
+    audio_base64: audioBase64,
+    mime_type: audioBlob.type || 'audio/webm',
+    language,
+    site_id: siteId || null,
+  }
 
-    formData.append('file', audioFile)
-    formData.append('model', 'whisper-1')
-    formData.append('language', this.language)
-    formData.append('response_format', 'json')
-
-    console.log('[Whisper] Sending audio to OpenAI')
-
+  const invokeProxy = async (accessToken: string): Promise<{ data: any; error: unknown }> => {
     try {
-      const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+      const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/ai-proxy`, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${this.apiKey}`,
-        },
-        body: formData,
-      })
-
-      if (!response.ok) {
-        const error = await response.text()
-        console.error('[Whisper] API error:', error)
-        throw new Error(`Transcription failed: ${response.status}`)
-      }
-
-      const result = await response.json()
-      console.log('[Whisper] Transcription result:', result)
-
-      return {
-        text: result.text || '',
-        duration: result.duration,
-      }
-    } catch (error) {
-      console.error('[Whisper] Transcription error:', error)
-      throw error
-    }
-  }
-
-  private getExtensionFromMimeType(mimeType: string): string {
-    if (mimeType.includes('webm')) return 'webm'
-    if (mimeType.includes('mp4')) return 'm4a'
-    if (mimeType.includes('ogg')) return 'ogg'
-    if (mimeType.includes('wav')) return 'wav'
-    return 'webm'
-  }
-}
-
-// OpenRouter Audio API client (uses chat completions with audio input)
-class OpenRouterAudioClient {
-  private apiKey: string
-  private model: AudioModel
-  private language: string
-
-  constructor(apiKey: string, model: AudioModel = 'openai/gpt-audio-mini', language = 'en') {
-    this.apiKey = apiKey
-    this.model = model
-    this.language = language
-  }
-
-  async transcribe(audioBlob: Blob): Promise<TranscriptionResult> {
-    const mimeType = audioBlob.type || 'audio/webm'
-
-    // For OpenRouter, always use Chat Completions with audio input
-    // because they don't support the dedicated /audio/transcriptions endpoint yet.
-    // Ensure we use a valid model for the chat endpoint
-    const modelToUse = this.model.includes('whisper') ? 'openai/gpt-audio-mini' : this.model
-    return this.transcribeWithChatEndpoint(audioBlob, mimeType, modelToUse)
-  }
-
-
-  private async transcribeWithChatEndpoint(audioBlob: Blob, _mimeType: string, modelToUse?: string): Promise<TranscriptionResult> {
-    const audioBase64 = await blobToBase64(audioBlob)
-    const model = modelToUse || this.model
-    console.log('[OpenRouter] Sending audio to Chat endpoint:', model, 'format: opus (from webm)')
-
-    // Chat models REQUIRE stream: true if audio modality is present
-    const requestBody = {
-      model: model,
-      modalities: ['text', 'audio'],
-      audio: { voice: 'alloy', format: 'pcm16' }, // 'wav' is not supported for streaming, 'pcm16' is
-      stream: true, // MANDATORY for audio models
-      messages: [
-        {
-          role: 'user',
-          content: [
-            {
-              type: 'input_audio',
-              input_audio: {
-                data: audioBase64,
-                format: 'opus', // High-end models handle opus in containers well
-              },
-            },
-            {
-              type: 'text',
-              text: `Transcribe this audio exactly. Output only the transcription, nothing else. Language: ${this.language}`,
-            },
-          ],
-        },
-      ],
-    }
-
-    try {
-      const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${this.apiKey}`,
+          Authorization: `Bearer ${accessToken}`,
+          apikey: import.meta.env.VITE_SUPABASE_ANON_KEY,
           'Content-Type': 'application/json',
-          'HTTP-Referer': window.location.origin,
-          'X-Title': 'ChefVoice Kiosk',
         },
         body: JSON.stringify(requestBody),
       })
 
+      const responseData = await response.json().catch(() => ({}))
       if (!response.ok) {
-        const error = await response.text()
-        console.error('[OpenRouter] Chat API error:', response.status, error)
-        throw new Error(`Chat transcription failed: ${response.status} - ${error}`)
-      }
-
-      // Handle streaming response to extract text
-      const reader = response.body?.getReader()
-      if (!reader) throw new Error('No response body')
-
-      const decoder = new TextDecoder()
-      let text = ''
-      let done = false
-
-      while (!done) {
-        const { value, done: readerDone } = await reader.read()
-        done = readerDone
-
-        if (value) {
-          const chunk = decoder.decode(value, { stream: !done })
-          const lines = chunk.split('\n').filter(line => line.trim().startsWith('data:'))
-
-          for (const line of lines) {
-            const dataString = line.replace(/^data: /, '').trim()
-            if (dataString === '[DONE]') continue
-
-            try {
-              const parsed = JSON.parse(dataString)
-              const delta = parsed.choices?.[0]?.delta
-
-              // Handle standard content delta
-              if (delta?.content) {
-                text += typeof delta.content === 'string' ? delta.content : ''
-              }
-              // Handle gpt-audio transcript delta
-              else if (delta?.audio?.transcript) {
-                text += delta.audio.transcript
-              }
-              // Handle gpt-audio-mini specific transcript field if any
-              else if (parsed.choices?.[0]?.message?.audio?.transcript) {
-                text += parsed.choices[0].message.audio.transcript
-              }
-            } catch (e) { /* skip partial lines */ }
-          }
+        return {
+          data: null,
+          error: {
+            status: response.status,
+            statusCode: response.status,
+            context: { status: response.status },
+            message: responseData?.error || response.statusText || 'Request failed',
+            details: responseData,
+          },
         }
       }
 
-      console.log('[OpenRouter] Chat transcription complete:', text)
-
-      return {
-        text: text.trim(),
-      }
+      return { data: responseData, error: null }
     } catch (error) {
-      console.error('[OpenRouter] Chat error:', error)
-      throw error
+      return { data: null, error }
     }
   }
 
+  const getHttpStatus = (error: unknown): number | null => {
+    const maybeStatus =
+      (error as any)?.context?.status ??
+      (error as any)?.status ??
+      (error as any)?.statusCode
+    if (typeof maybeStatus === 'number') {
+      return maybeStatus
+    }
+    return null
+  }
+
+  const getAccessToken = async (): Promise<string> => {
+    const { data: initialSession } = await supabase.auth.getSession()
+    if (initialSession.session?.access_token) {
+      return initialSession.session.access_token
+    }
+
+    // Kiosk tabs can wake up with stale in-memory auth. Try one refresh.
+    const { data: refreshed, error: refreshError } = await supabase.auth.refreshSession()
+    if (refreshError || !refreshed.session?.access_token) {
+      throw new Error('Unauthorized')
+    }
+    return refreshed.session.access_token
+  }
+
+  let accessToken = await getAccessToken()
+  let { data: result, error } = await invokeProxy(accessToken)
+
+  // Retry once if function gateway rejected JWT.
+  const status = getHttpStatus(error)
+  if (status === 401) {
+    console.warn('[Voice] Edge Function returned 401. Refreshing session and retrying once...')
+    const { data: refreshed, error: refreshError } = await supabase.auth.refreshSession()
+    if (!refreshError && refreshed.session?.access_token) {
+      accessToken = refreshed.session.access_token
+      const retry = await invokeProxy(accessToken)
+      result = retry.data
+      error = retry.error
+    }
+  }
+
+  if (error) {
+    const finalStatus = getHttpStatus(error)
+    console.error('[Voice] Edge Function error:', { status: finalStatus, error })
+    if (finalStatus === 401) {
+      throw new Error('Unauthorized')
+    }
+    throw new Error(`Transcription failed${finalStatus ? `: ${finalStatus}` : ''}`)
+  }
+
+  console.log('[Voice] Transcription result:', result.text)
+
+  return {
+    text: result.text || '',
+    duration: result.duration,
+  }
 }
 
 // Combined service for voice recognition
 export class VoiceRecognitionService {
   private recorder: AudioRecorder
-  private whisperClient: WhisperClient | null = null
-  private openRouterClient: OpenRouterAudioClient | null = null
-  private activeProvider: 'openai' | 'openrouter' | null = null
-  private isInitialized = false
+  private language: string = 'en'
+  private siteId: string | null = null
+  private _isConfigured = false
 
   constructor() {
     this.recorder = new AudioRecorder()
   }
 
-  initialize(config: VoiceConfig): void {
-    console.log('[VoiceService] Initializing with provider:', config.provider)
-    console.log('[VoiceService] Model:', config.model || 'default')
-    console.log('[VoiceService] Language:', config.language)
-    
-    if (config.provider === 'openai') {
-      this.whisperClient = new WhisperClient(config.apiKey, config.language)
-      this.activeProvider = 'openai'
-      console.log('[VoiceService] ✅ Initialized with OpenAI Whisper')
-    } else if (config.provider === 'openrouter') {
-      this.openRouterClient = new OpenRouterAudioClient(
-        config.apiKey,
-        config.model || 'openai/gpt-audio-mini',
-        config.language
-      )
-      this.activeProvider = 'openrouter'
-      console.log('[VoiceService] ✅ Initialized with OpenRouter:', config.model)
-    }
-    this.isInitialized = true
+  /**
+   * Initialize the service. No API key needed — the Edge Function handles that.
+   */
+  initialize(config: { language?: string; siteId?: string }): void {
+    console.log('[VoiceService] Initializing (server-side AI)')
+    this.language = config.language || 'en'
+    this.siteId = config.siteId || null
+    this._isConfigured = true
+    console.log('[VoiceService] ✅ Ready — transcription via Edge Function')
   }
 
   get isConfigured(): boolean {
-    return this.isInitialized && (this.whisperClient !== null || this.openRouterClient !== null)
+    return this._isConfigured
   }
 
-  get provider(): string | null {
-    return this.activeProvider
+  get provider(): string {
+    return 'whisper-edge'
   }
 
   get isRecording(): boolean {
@@ -424,14 +348,11 @@ export class VoiceRecognitionService {
 
   async startRecording(): Promise<void> {
     console.log('[VoiceService] startRecording called')
-    console.log('[VoiceService] isConfigured:', this.isConfigured)
-    console.log('[VoiceService] activeProvider:', this.activeProvider)
-    
-    if (!this.isConfigured) {
+
+    if (!this._isConfigured) {
       console.error('[VoiceService] Not configured!')
-      throw new Error('Voice service not configured. Please set API key in Settings.')
+      throw new Error('Voice service not configured. Call initialize() first.')
     }
-    console.log('[VoiceService] Starting AudioRecorder...')
     await this.recorder.start()
     console.log('[VoiceService] AudioRecorder started successfully')
   }
@@ -442,26 +363,19 @@ export class VoiceRecognitionService {
     console.log('[VoiceService] Audio blob size:', audioBlob.size, 'bytes')
 
     // Check if we have enough audio
-    if (audioBlob.size < 1000) {
+    // Note: some devices/browsers produce very small blobs for short answers
+    // (e.g., "one"). Keep the threshold low so we still attempt transcription.
+    if (audioBlob.size < 200) {
       console.log('[VoiceService] Audio too short, skipping transcription')
       return ''
     }
 
-    // Use appropriate client
-    console.log('[VoiceService] Using provider:', this.activeProvider)
-    if (this.activeProvider === 'openai' && this.whisperClient) {
-      console.log('[VoiceService] Sending to OpenAI Whisper...')
-      const result = await this.whisperClient.transcribe(audioBlob)
-      console.log('[VoiceService] OpenAI result:', result.text)
-      return result.text
-    } else if (this.activeProvider === 'openrouter' && this.openRouterClient) {
-      console.log('[VoiceService] Sending to OpenRouter...')
-      const result = await this.openRouterClient.transcribe(audioBlob)
-      console.log('[VoiceService] OpenRouter result:', result.text)
-      return result.text
-    }
-
-    throw new Error('No voice provider configured')
+    const result = await transcribeViaEdgeFunction(
+      audioBlob,
+      this.language,
+      this.siteId || undefined
+    )
+    return result.text
   }
 
   cancelRecording(): void {

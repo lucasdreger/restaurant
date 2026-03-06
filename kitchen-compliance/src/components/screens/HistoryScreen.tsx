@@ -2,6 +2,7 @@ import { useState, useMemo } from 'react'
 import { ArrowLeft, Calendar, Download, CheckCircle, AlertTriangle, Trash2, Filter, Thermometer, User } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { useAppStore } from '@/store/useAppStore'
+import { useCoolingHistory } from '@/hooks/queries/useCooling'
 import type { CoolingSession } from '@/types'
 import { cn, getTimeDifferenceMinutes } from '@/lib/utils'
 import { format, startOfDay, endOfDay, subDays, isWithinInterval } from 'date-fns'
@@ -14,7 +15,8 @@ type DateFilter = 'today' | 'week' | 'month' | 'all'
 type StatusFilter = 'all' | 'completed' | 'overdue' | 'discarded'
 
 export function HistoryScreen({ onBack }: HistoryScreenProps) {
-  const { coolingSessions } = useAppStore()
+  const { currentSite } = useAppStore()
+  const { data: coolingSessions = [] } = useCoolingHistory(currentSite?.id)
   const [dateFilter, setDateFilter] = useState<DateFilter>('today')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
 

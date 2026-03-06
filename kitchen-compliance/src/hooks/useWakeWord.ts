@@ -37,37 +37,67 @@ interface SpeechRecognition extends EventTarget {
 
 // Check if transcript contains any wake word from the list
 function containsWakeWord(transcript: string, wakeWords: string[]): boolean {
-  // Use fuzzy matching for better detection in noise
-  // But strictly ignore very short inputs to reduce false positives
-  if (transcript.length < 3) return false
+  const cleaned = transcript.toLowerCase().trim()
+  if (cleaned.length < 3) return false
 
-  return wakeWords.some(wake => isLike(transcript, wake))
+  return wakeWords.some((wake) => {
+    const wakeLower = wake.toLowerCase().trim()
+
+    // Fast exact containment
+    if (cleaned.includes(wakeLower)) return true
+
+    // Fuzzy check on sliding windows (better for noisy ASR around wake word)
+    const words = cleaned.split(/\s+/).filter(Boolean)
+    const wakeLen = wakeLower.split(/\s+/).length
+
+    for (let i = 0; i < words.length; i += 1) {
+      const slice = words.slice(i, i + wakeLen + 1).join(' ')
+      if (slice && isLike(slice, wakeLower, 2)) return true
+    }
+
+    return false
+  })
 }
 
 // Extract command after wake word (if any)
 function extractCommandAfterWakeWord(transcript: string, wakeWords: string[]): string | null {
-  const lower = transcript.toLowerCase().trim()
+  const raw = transcript.trim()
+  const lower = raw.toLowerCase()
+  if (!raw) return null
 
-  for (const wake of wakeWords) {
-    if (isLike(lower, wake)) {
-      // approximate match found, try to strip it
-      // Since it's fuzzy, we can't just slice by length of wake word
-      // Simple heuristic: remove the first occurrence of the wake word (or close to it)
-      // For now, simpler approach: if it *starts* with something like wake word
-      const parts = lower.split(' ')
-      if (parts.length > 1) {
-        // Assume first part(s) might be wake word. 
-        // This is tricky with fuzzy matching. 
-        // Let's stick to standard slice if exact match, otherwise try best guess
-        const wakeLower = wake.toLowerCase()
-        const index = lower.indexOf(wakeLower)
-        if (index !== -1) {
-          const afterWake = transcript.slice(index + wake.length).trim()
-          return afterWake.length >= 1 ? afterWake : null
-        }
+  // 1) Prefer exact wake-word hit anywhere in phrase (not only full-string match).
+  const sortedWakeWords = [...wakeWords].sort((a, b) => b.length - a.length)
+  for (const wake of sortedWakeWords) {
+    const wakeLower = wake.toLowerCase().trim()
+    if (!wakeLower) continue
+
+    const index = lower.indexOf(wakeLower)
+    if (index === -1) continue
+
+    const afterWake = raw.slice(index + wakeLower.length).trim()
+    if (afterWake.length >= 1) return afterWake
+  }
+
+  // 2) Fuzzy fallback: detect a near wake-word in token windows and keep trailing words.
+  const tokens = raw.split(/\s+/).filter(Boolean)
+  if (tokens.length <= 1) return null
+
+  for (const wake of sortedWakeWords) {
+    const wakeLen = wake.trim().split(/\s+/).filter(Boolean).length
+    if (wakeLen <= 0) continue
+
+    for (let i = 0; i < tokens.length; i += 1) {
+      const end = Math.min(tokens.length, i + wakeLen + 1)
+      const slice = tokens.slice(i, end).join(' ').toLowerCase()
+      if (!slice) continue
+
+      if (isLike(slice, wake.toLowerCase(), 2)) {
+        const afterWake = tokens.slice(end).join(' ').trim()
+        if (afterWake.length >= 1) return afterWake
       }
     }
   }
+
   return null
 }
 
@@ -109,6 +139,7 @@ export function useWakeWord(options: UseWakeWordOptions) {
 
   const pendingDetectionRef = useRef(false)
   const pendingCommandRef = useRef<string | null>(null)
+  const wakeWordOnlyTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
   // Keep refs up to date
   useEffect(() => {
@@ -140,6 +171,9 @@ export function useWakeWord(options: UseWakeWordOptions) {
 
   // Start wake word listening
   const startListening = useCallback(() => {
+    // Critical: while in command mode (wake word already detected), do not restart.
+    // Parent re-renders can retrigger this hook's effect; restarting here will abort the active mic session.
+    if (isInCommandModeRef.current) return
     if (!isSupported || recognitionRef.current || isStartingRef.current) return
 
     isStartingRef.current = true
@@ -160,6 +194,10 @@ export function useWakeWord(options: UseWakeWordOptions) {
       setError(null)
       isStartingRef.current = false
       consecutiveErrorsRef.current = 0
+      if (wakeWordOnlyTimeoutRef.current) {
+        clearTimeout(wakeWordOnlyTimeoutRef.current)
+        wakeWordOnlyTimeoutRef.current = null
+      }
     }
 
     recognition.onend = () => {
@@ -228,21 +266,38 @@ export function useWakeWord(options: UseWakeWordOptions) {
               // User said command in same breath as wake word (e.g., "Hey Luma done" or "Hey Luma finish cooling 2")
               // Reduced from > 3 to >= 1 to allow single numbers like "2" or "#2"
               console.log('[WakeWord] Immediate command detected:', immediateCommand)
+              if (wakeWordOnlyTimeoutRef.current) {
+                clearTimeout(wakeWordOnlyTimeoutRef.current)
+                wakeWordOnlyTimeoutRef.current = null
+              }
               pendingCommandRef.current = immediateCommand
               isAbortingRef.current = true
               recognition.stop()
             } else {
-              // Just wake word - IMMEDIATELY trigger command mode (NO DELAY!)
-              console.log('[WakeWord] Wake word only - IMMEDIATELY stopping to start command recording')
-              pendingDetectionRef.current = true
-              isAbortingRef.current = true
-              recognition.stop()
+              // Just wake word (for now). Keep a brief grace window to capture
+              // "wake word + command" that often arrives in the next final chunk.
+              console.log('[WakeWord] Wake word only - waiting briefly for follow-up command')
+              if (wakeWordOnlyTimeoutRef.current) {
+                clearTimeout(wakeWordOnlyTimeoutRef.current)
+              }
+              wakeWordOnlyTimeoutRef.current = setTimeout(() => {
+                // If no follow-up command arrived, enter command mode capture.
+                if (!isInCommandModeRef.current || !recognitionRef.current) return
+                pendingDetectionRef.current = true
+                isAbortingRef.current = true
+                recognitionRef.current.stop()
+                wakeWordOnlyTimeoutRef.current = null
+              }, 600)
             }
             return
           }
         } else if (isInCommandModeRef.current && isFinal) {
           // User spoke something AFTER the interim wake word but in a separate final result
           console.log('[WakeWord] Command follow-up after wake word:', transcript)
+          if (wakeWordOnlyTimeoutRef.current) {
+            clearTimeout(wakeWordOnlyTimeoutRef.current)
+            wakeWordOnlyTimeoutRef.current = null
+          }
           pendingCommandRef.current = transcript
           isAbortingRef.current = true
           recognition.stop()
@@ -287,6 +342,13 @@ export function useWakeWord(options: UseWakeWordOptions) {
 
     isAbortingRef.current = true
     isStartingRef.current = false
+    isInCommandModeRef.current = false
+    pendingDetectionRef.current = false
+    pendingCommandRef.current = null
+    if (wakeWordOnlyTimeoutRef.current) {
+      clearTimeout(wakeWordOnlyTimeoutRef.current)
+      wakeWordOnlyTimeoutRef.current = null
+    }
 
     if (recognitionRef.current) {
       try {
@@ -308,7 +370,7 @@ export function useWakeWord(options: UseWakeWordOptions) {
           isInCommandModeRef.current = false
           startListening()
         }
-      }, 100) // Reduced from 1000ms for faster response
+      }, 1000)
     }
   }, [enabled, startListening])
 
@@ -336,27 +398,84 @@ export function useWakeWord(options: UseWakeWordOptions) {
   }
 }
 
+// Shared AudioContext to better handle browser autoplay policies
+let sharedAudioContext: AudioContext | null = null
+let wakeAudioUnlocked = false
+let wakeAudioUnlockBootstrapped = false
+
+function getAudioContext(createIfMissing = true) {
+  if (!createIfMissing) return sharedAudioContext
+
+  if (!sharedAudioContext) {
+    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext
+    if (AudioContextClass) {
+      sharedAudioContext = new AudioContextClass()
+    }
+  }
+  return sharedAudioContext
+}
+
+function bootstrapWakeAudioUnlock() {
+  if (wakeAudioUnlockBootstrapped || typeof window === 'undefined') return
+  wakeAudioUnlockBootstrapped = true
+
+  const tryUnlock = () => {
+    const audioContext = getAudioContext()
+    if (!audioContext) return
+
+    void audioContext
+      .resume()
+      .then(() => {
+        if (audioContext.state === 'running') {
+          wakeAudioUnlocked = true
+          window.removeEventListener('pointerdown', tryUnlock)
+          window.removeEventListener('touchstart', tryUnlock)
+          window.removeEventListener('keydown', tryUnlock)
+        }
+      })
+      .catch(() => {
+        // Ignore - still waiting for a valid user gesture.
+      })
+  }
+
+  window.addEventListener('pointerdown', tryUnlock, { passive: true })
+  window.addEventListener('touchstart', tryUnlock, { passive: true })
+  window.addEventListener('keydown', tryUnlock)
+}
+
 // Play a sound when wake word is detected
 export function playWakeSound() {
-  // Create a simple beep using Web Audio API
   try {
-    const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)()
-    const oscillator = audioContext.createOscillator()
-    const gainNode = audioContext.createGain()
+    // Never attempt resume outside a user gesture - Chrome logs noisy autoplay warnings.
+    // We unlock once on an actual pointer/key interaction, then beep becomes available.
+    bootstrapWakeAudioUnlock()
+    if (!wakeAudioUnlocked) return
 
-    oscillator.connect(gainNode)
-    gainNode.connect(audioContext.destination)
+    const audioContext = getAudioContext(false)
+    if (!audioContext) return
 
-    oscillator.frequency.value = 800 // Hz
-    oscillator.type = 'sine'
+    const playBeep = () => {
+      const oscillator = audioContext.createOscillator()
+      const gainNode = audioContext.createGain()
 
-    gainNode.gain.setValueAtTime(0.3, audioContext.currentTime)
-    gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.2)
+      oscillator.connect(gainNode)
+      gainNode.connect(audioContext.destination)
 
-    oscillator.start(audioContext.currentTime)
-    oscillator.stop(audioContext.currentTime + 0.2)
+      oscillator.frequency.value = 800 // Hz
+      oscillator.type = 'sine'
+
+      gainNode.gain.setValueAtTime(0.3, audioContext.currentTime)
+      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.2)
+
+      oscillator.start(audioContext.currentTime)
+      oscillator.stop(audioContext.currentTime + 0.2)
+    }
+
+    if (audioContext.state !== 'running') return
+
+    playBeep()
   } catch (e) {
-    console.log('[WakeWord] Could not play sound:', e)
+    // Ignore wake sound failures to avoid noisy console output.
   }
 }
 

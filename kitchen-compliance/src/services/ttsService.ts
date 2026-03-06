@@ -5,14 +5,18 @@
  * - Queueing system (never drops speech)
  * - Mobile audio unlock (plays silent buffer)
  * - Auto-retry for failures
- * - Configurable voices
+ * - OpenAI TTS via Edge Function (no client-side API keys)
+ * - Browser Speech Synthesis fallback
  */
+
+import { isSupabaseConfigured, supabase } from '@/lib/supabase'
 
 type SpeakOptions = {
     rate?: number
     pitch?: number
     volume?: number
     voice?: SpeechSynthesisVoice
+    preferBrowser?: boolean
     onStart?: () => void
     onEnd?: () => void
     onError?: (error: any) => void
@@ -27,7 +31,6 @@ type QueueItem = {
 
 class TTSService {
     private audioCache: Map<string, string> = new Map() // text -> blobUrl
-    private apiKey: string | null = null
     private useOpenAI: boolean = false
     private openAIVoice: 'alloy' | 'echo' | 'fable' | 'onyx' | 'nova' | 'shimmer' = 'alloy'
 
@@ -37,15 +40,41 @@ class TTSService {
     private isInitialized: boolean = false
     private voices: SpeechSynthesisVoice[] = []
     private selectedVoice: SpeechSynthesisVoice | null = null
+    private hasUnlockedAudio: boolean = false
 
     constructor() {
         if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
             this.init()
+            // Try to unlock audio on first interaction
+            window.addEventListener('click', this.unlockAudioBound, { once: true })
+            window.addEventListener('touchstart', this.unlockAudioBound, { once: true })
+            window.addEventListener('keydown', this.unlockAudioBound, { once: true })
         }
     }
 
-    configure(config: { apiKey?: string; useOpenAI?: boolean; voice?: string }) {
-        if (config.apiKey) this.apiKey = config.apiKey
+    private unlockAudio() {
+        if (this.hasUnlockedAudio || typeof window === 'undefined') return
+
+        try {
+            // Creating and speaking an empty utterance unlocks the voice engine on iOS/Safari
+            const utterance = new SpeechSynthesisUtterance('')
+            utterance.volume = 0
+            window.speechSynthesis.speak(utterance)
+            window.speechSynthesis.cancel() // immediately cancel finding it
+            this.hasUnlockedAudio = true
+
+            window.removeEventListener('click', this.unlockAudioBound)
+            window.removeEventListener('touchstart', this.unlockAudioBound)
+            window.removeEventListener('keydown', this.unlockAudioBound)
+            console.log('[TTS] Audio unlocked via user interaction')
+        } catch (e) {
+            console.warn('[TTS] SpeechSynthesis unlock failed:', e)
+        }
+    }
+
+    private unlockAudioBound = this.unlockAudio.bind(this)
+
+    configure(config: { useOpenAI?: boolean; voice?: string }) {
         if (config.useOpenAI !== undefined) this.useOpenAI = config.useOpenAI
         if (config.voice) this.openAIVoice = config.voice as any
         console.log('[TTS] Configured:', { useOpenAI: this.useOpenAI, voice: this.openAIVoice })
@@ -86,8 +115,6 @@ class TTSService {
             this.cancel()
         }
 
-        // Add natural pauses to text if not already processed
-        // For OpenAI, we send raw text mostly, but punctuation helps
         const processedText = this.preprocessText(text)
 
         this.queue.push({
@@ -121,49 +148,90 @@ class TTSService {
         this.isSpeaking = true
         const item = this.queue[0]
 
-        // Decide provider
-        if (this.useOpenAI && this.apiKey) {
+        // Decide provider. Flow prompts can force browser speech to avoid
+        // autoplay-blocked Audio element playback in some kiosk/browser states.
+        if (item.options.preferBrowser) {
+            this.speakBrowser(item)
+        } else if (this.useOpenAI) {
             await this.speakOpenAI(item)
         } else {
-            if (this.useOpenAI && !this.apiKey) {
-                console.warn('[TTS] OpenAI enabled but no API key found. Falling back to browser.')
-            } else if (!this.useOpenAI) {
-                console.log('[TTS] OpenAI disabled in settings. Using browser.')
-            }
             this.speakBrowser(item)
         }
     }
 
+    /**
+     * TTS via ai-proxy Edge Function — no client-side API key needed
+     */
     private async speakOpenAI(item: QueueItem) {
+        if (!isSupabaseConfigured()) {
+            console.warn('[TTS] Supabase not configured, falling back to browser')
+            this.speakBrowser(item)
+            return
+        }
+
         const cacheKey = `${item.text}-${this.openAIVoice}`
 
         try {
             item.options.onStart?.()
-            console.log('[TTS] Speaking (OpenAI):', item.text)
+            console.log('[TTS] Speaking (OpenAI via Edge Function):', item.text)
 
             let audioUrl = this.audioCache.get(cacheKey)
 
             if (!audioUrl) {
-                console.log('[TTS] Cache miss, fetching from OpenAI...')
-                const response = await fetch('https://api.openai.com/v1/audio/speech', {
-                    method: 'POST',
-                    headers: {
-                        'Authorization': `Bearer ${this.apiKey}`,
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        model: 'tts-1',
-                        input: item.text,
-                        voice: this.openAIVoice,
-                        response_format: 'mp3',
-                        speed: item.options.rate || 1.0
-                    }),
-                })
+                console.log('[TTS] Cache miss, fetching from Edge Function...')
+
+                const { data: { session } } = await supabase.auth.getSession()
+                if (!session?.access_token) {
+                    const { data: refreshed, error: refreshError } = await supabase.auth.refreshSession()
+                    if (refreshError || !refreshed.session?.access_token) {
+                        console.warn('[TTS] Not authenticated, falling back to browser')
+                        this.speakBrowser(item)
+                        return
+                    }
+                }
+
+                const invokeTTS = async (accessToken: string) => {
+                    return fetch(
+                        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/ai-proxy`,
+                        {
+                            method: 'POST',
+                            headers: {
+                                'Authorization': `Bearer ${accessToken}`,
+                                'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
+                                'Content-Type': 'application/json',
+                            },
+                            body: JSON.stringify({
+                                action: 'tts',
+                                text: item.text,
+                                voice: this.openAIVoice,
+                                speed: item.options.rate || 1.0,
+                            }),
+                        }
+                    )
+                }
+
+                const { data: latest } = await supabase.auth.getSession()
+                let accessToken = latest.session?.access_token
+                if (!accessToken) {
+                    console.warn('[TTS] Not authenticated, falling back to browser')
+                    this.speakBrowser(item)
+                    return
+                }
+
+                let response = await invokeTTS(accessToken)
+                if (!response.ok && response.status === 401) {
+                    console.warn('[TTS] Edge Function returned 401. Refreshing session and retrying once...')
+                    const { data: refreshed, error: refreshError } = await supabase.auth.refreshSession()
+                    if (!refreshError && refreshed.session?.access_token) {
+                        accessToken = refreshed.session.access_token
+                        response = await invokeTTS(accessToken)
+                    }
+                }
 
                 if (!response.ok) {
                     const errorText = await response.text()
-                    console.error('[TTS] OpenAI API Error Body:', errorText)
-                    throw new Error(`OpenAI TTS Error: ${response.status} ${response.statusText} - ${errorText}`)
+                    console.error('[TTS] Edge Function Error:', errorText)
+                    throw new Error(`TTS Error: ${response.status}`)
                 }
 
                 const blob = await response.blob()
@@ -228,11 +296,8 @@ class TTSService {
 
     cancel() {
         if (this.useOpenAI) {
-            // Can't easily cancel Audio element if we don't store ref, 
-            // but we can clear queue so next items don't play
             this.queue = []
             this.isSpeaking = false
-            // TODO: Stop current audio if possible (would need to track currentAudio)
         }
         window.speechSynthesis.cancel()
         this.queue = []

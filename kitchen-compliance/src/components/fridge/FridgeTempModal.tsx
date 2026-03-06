@@ -3,6 +3,7 @@ import { X, Thermometer, Check, AlertTriangle, ChevronLeft, ChevronRight, Delete
 import { cn } from '@/lib/utils'
 import { getFridges, logFridgeTemp, type Fridge, FRIDGE_LIMITS } from '@/services/fridgeService'
 import { useAppStore } from '@/store/useAppStore'
+import { useStaff } from '@/hooks/queries/useStaff'
 import { toast } from 'sonner'
 
 interface FridgeTempModalProps {
@@ -22,7 +23,8 @@ export function FridgeTempModal({
   preselectedTemperature,
   preselectedStaffId
 }: FridgeTempModalProps) {
-  const { currentSite, settings, staffMembers } = useAppStore()
+  const { currentSite, settings } = useAppStore()
+  const { data: staffMembers = [] } = useStaff(currentSite?.id)
 
   const [fridges, setFridges] = useState<Fridge[]>([])
   const [selectedFridgeIndex, setSelectedFridgeIndex] = useState(0)

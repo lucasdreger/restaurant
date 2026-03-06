@@ -216,8 +216,9 @@ export function OnboardingQuestionnaire({ userId, userEmail, onComplete }: Onboa
             <button
               onClick={async () => {
                 const { supabase } = await import('@/lib/supabase')
+                const { clearKitchenComplianceAppStorage } = await import('@/lib/appStorage')
                 await supabase.auth.signOut()
-                localStorage.clear()
+                clearKitchenComplianceAppStorage()
                 window.location.reload()
               }}
               className="ml-auto text-sm text-slate-400 hover:text-white underline decoration-slate-600 hover:decoration-white underline-offset-4 transition-all"

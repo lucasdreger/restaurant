@@ -1,27 +1,41 @@
-import { useCallback, useEffect, useImperativeHandle, forwardRef } from 'react'
+import { useCallback, useEffect, useImperativeHandle, forwardRef, useMemo, useRef } from 'react'
 import { Mic, MicOff, Volume2, Loader2, Radio } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { useVoiceRecognition, useTextToSpeech } from '@/hooks/useVoiceRecognition'
+import { useTextToSpeech } from '@/hooks/useVoiceRecognition'
 import { useWhisperVoice } from '@/hooks/useWhisperVoice'
 import { useBrowserSpeech } from '@/hooks/useBrowserSpeech'
+import { useRealtimeVoice } from '@/hooks/useRealtimeVoice'
 import { useAppStore } from '@/store/useAppStore'
 import type { VoiceCommand } from '@/types'
-import { getVoiceFeedback } from '@/lib/voiceCommands'
+import { getVoiceFeedback, parseVoiceCommand } from '@/lib/voiceCommands'
 
 export interface VoiceButtonHandle {
   triggerVoice: () => void
   stopVoice: () => void
+  speakText: (text: string, options?: { onStart?: () => void; onComplete?: () => void; rate?: number; pitch?: number }) => boolean
 }
+
+export type VoiceInteractionState =
+  | 'idle'
+  | 'wake_ready'
+  | 'connecting'
+  | 'listening'
+  | 'processing'
+  | 'speaking'
+  | 'flow_active'
+  | 'error'
 
 interface VoiceButtonProps {
   onCommand: (command: VoiceCommand) => void
   onTranscript?: (transcript: string) => void
   onInterimTranscript?: (transcript: string) => void // Called with interim (partial) transcripts for early detection
   onEnd?: () => void
+  onInteractionStateChange?: (state: VoiceInteractionState, detail?: string) => void
   className?: string
   size?: 'sm' | 'md' | 'lg'
   wakeWordActive?: boolean
   wakeWordTriggered?: boolean
+  wakeWordTriggerToken?: number
   wakeWordLabel?: string // e.g. "Hey Luma" for display
   conversationMode?: boolean // Force browser speech for conversation flows
   quickResponseMode?: boolean // When true, use shorter silence timeout (for staff code, temperature)
@@ -29,46 +43,43 @@ interface VoiceButtonProps {
 
 export const VoiceButton = forwardRef<VoiceButtonHandle, VoiceButtonProps>(
   function VoiceButton(
-    { onCommand, onTranscript, onInterimTranscript, onEnd, className, size = 'lg', wakeWordActive = false, wakeWordTriggered = false, wakeWordLabel = 'Hey Luma', conversationMode = false, quickResponseMode = false },
+    {
+      onCommand,
+      onTranscript,
+      onInterimTranscript,
+      onEnd,
+      onInteractionStateChange,
+      className,
+      size = 'lg',
+      wakeWordActive = false,
+      wakeWordTriggered = false,
+      wakeWordTriggerToken = 0,
+      wakeWordLabel = 'Hey Luma',
+      conversationMode = false,
+      quickResponseMode = false,
+    },
     ref
   ) {
     const { speak } = useTextToSpeech()
-    const { settings } = useAppStore()
+    const { settings, updateSettings } = useAppStore()
+    const wasVoiceActiveRef = useRef(false)
+    const wakeWordTriggerConsumedRef = useRef(false)
+    const lastWakeWordTriggerTokenRef = useRef(0)
 
-    const hasApiKey = !!(settings.openaiApiKey || settings.openrouterApiKey)
-
-    // Use Whisper if explicitly selected AND API key exists
-    const isWhisperSelected = settings.voiceProvider === 'openai' || settings.voiceProvider === 'openrouter'
-
-    // Automatic fallback logic: Use Whisper only if selected AND has key. 
-    // If Whisper is selected but NO key, useWhisper becomes false and it falls back to browser.
-    const useWhisper = isWhisperSelected && hasApiKey
-
-    // Detect if we are in a fallback state (Whisper requested but not configured)
-    const isFallingBack = isWhisperSelected && !hasApiKey
-
-    const providerLabel = isFallingBack
-      ? `Browser (Fallback from ${settings.voiceProvider})`
-      : settings.voiceProvider === 'openai'
-        ? 'OpenAI Whisper'
-        : settings.voiceProvider === 'openrouter'
-          ? `OpenRouter (${settings.audioModel?.split('/')[1] || 'gpt-audio-mini'})`
-          : 'Browser'
+    // Provider selection
+    const useRealtime = settings.voiceProvider === 'realtime'
+    // Use Whisper (via Edge Function) when selected — no API key needed client-side
+    const useWhisper = settings.voiceProvider === 'whisper'
+    const providerLabel = useWhisper
+      ? 'Whisper (Edge Function)'
+      : useRealtime
+        ? 'Realtime (OpenAI)'
+        : 'Browser'
 
     // DEBUG: Log voice provider selection
     useEffect(() => {
-      console.log('[VoiceButton] === VOICE PROVIDER DEBUG ===')
-      console.log('[VoiceButton] settings.voiceProvider:', settings.voiceProvider)
-      console.log('[VoiceButton] settings.openaiApiKey exists:', !!settings.openaiApiKey)
-      console.log('[VoiceButton] settings.openrouterApiKey exists:', !!settings.openrouterApiKey)
-      console.log('[VoiceButton] settings.audioModel:', settings.audioModel)
-      console.log('[VoiceButton] hasApiKey:', hasApiKey)
-      console.log('[VoiceButton] useWhisper (API voice):', useWhisper)
-      console.log('[VoiceButton] isFallingBack:', isFallingBack)
-      console.log('[VoiceButton] conversationMode:', conversationMode)
-      console.log('[VoiceButton] Provider in use:', providerLabel)
-      console.log('[VoiceButton] =================================')
-    }, [settings.voiceProvider, settings.openaiApiKey, settings.openrouterApiKey, settings.audioModel, useWhisper, hasApiKey, isFallingBack, conversationMode, providerLabel])
+      console.log('[VoiceButton] voiceProvider:', settings.voiceProvider, '| useWhisper:', useWhisper, '| useRealtime:', useRealtime, '| conversationMode:', conversationMode)
+    }, [settings.voiceProvider, useWhisper, useRealtime, conversationMode])
 
     // Handle command with voice feedback - defined early so hooks can use it
     const handleCommand = useCallback((command: VoiceCommand) => {
@@ -77,6 +88,11 @@ export const VoiceButton = forwardRef<VoiceButtonHandle, VoiceButtonProps>(
       // CRITICAL: In conversation mode, ignore all commands (user is answering questions)
       if (conversationMode) {
         console.log('[VoiceButton] Ignoring command in conversation mode')
+        return
+      }
+
+      if (command.type === 'noise' || command.type === 'unknown') {
+        console.log('[VoiceButton] Ignoring non-actionable command:', command.type)
         return
       }
 
@@ -97,36 +113,43 @@ export const VoiceButton = forwardRef<VoiceButtonHandle, VoiceButtonProps>(
       onEnd?.()
     }, [onEnd])
 
-    // Browser Speech API hook for commands (parses as commands)
-    // CRITICAL: Disable this hook entirely in conversation mode to prevent competing Speech Recognition instances
-    const browserCommandVoice = useVoiceRecognition({
-      disabled: conversationMode || useWhisper, // Don't use browser if Whisper is available
-      onCommand: handleCommand,
-      onTranscript: onTranscript,
-      onError: (err) => {
-        console.error('[BrowserVoice] Error:', err)
-        handleEnd()
-      },
-    })
-
-    // Browser Speech hook for conversation (transcript only) - fallback when no API key
-    const browserConversationVoice = useBrowserSpeech({
-      onTranscript: (transcript, isFinal) => {
-        console.log('[BrowserConversation] Transcript:', transcript, 'isFinal:', isFinal)
+    // Single browser speech hook for both command + conversation modes.
+    // Important: browserSpeechService is singleton-based, so we must keep one subscriber.
+    const browserVoice = useBrowserSpeech({
+      onTranscript: (text, isFinal) => {
         if (conversationMode) {
+          console.log('[BrowserConversation] Transcript:', text, 'isFinal:', isFinal)
           if (isFinal) {
-            onTranscript?.(transcript)
+            onTranscript?.(text)
           } else {
-            onInterimTranscript?.(transcript)
+            onInterimTranscript?.(text)
           }
+          return
+        }
+
+        if (isFinal) {
+          console.log('[BrowserCommand] Transcript:', text, 'isFinal:', isFinal)
+          onTranscript?.(text)
+          const command = parseVoiceCommand(text)
+          handleCommand(command)
+        } else {
+          onInterimTranscript?.(text)
         }
       },
       onError: (err) => {
-        console.error('[BrowserConversation] Error:', err)
-        handleEnd()
+        console.error(conversationMode ? '[BrowserConversation] Error:' : '[BrowserCommand] Error:', err)
       },
       onEnd: handleEnd,
-      silenceTimeout: 10000, // Wait 10s for user to respond in conversation mode
+      // Continuous mode is more resilient for interview flows on noisy devices.
+      continuous: conversationMode || useRealtime,
+      silenceTimeout: conversationMode ? 10000 : useRealtime ? 2600 : 4500,
+      // Conversation answers (staff code/temp) can be slightly longer ("one point five"),
+      // so allow more time after speech is detected.
+      postSpeechTimeout: conversationMode ? 2500 : useRealtime ? 850 : 1300,
+      // In conversation mode, never stall the flow waiting for a final result that may never come.
+      flushInterimAsFinalOnEnd: conversationMode || useRealtime,
+      // Also ensure "no-speech" doesn't stall the interview; let the flow prompt retries.
+      emitEmptyFinalOnNoSpeech: conversationMode || useRealtime,
     })
 
     // Whisper API hook - use for both command and conversation modes when API key available
@@ -137,9 +160,52 @@ export const VoiceButton = forwardRef<VoiceButtonHandle, VoiceButtonProps>(
       quickResponseMode: quickResponseMode, // Use shorter silence timeout for staff code/temperature
       onError: (err) => {
         console.error('[WhisperVoice] Error:', err)
+        const lower = String(err || '').toLowerCase()
+        const isAuthError =
+          lower.includes('401') ||
+          lower.includes('unauthorized') ||
+          lower.includes('not authenticated')
+
+        if (isAuthError && settings.voiceProvider === 'whisper') {
+          console.warn('[VoiceButton] Whisper auth failed; falling back to realtime voice provider')
+          updateSettings({ voiceProvider: 'realtime' })
+          speak('Whisper is unavailable. Switching to realtime voice mode.')
+          return
+        }
+
         handleEnd()
       },
     })
+
+    const realtimeVoice = useRealtimeVoice({
+      onTranscript: (text, isFinal) => {
+        if (conversationMode) {
+          if (isFinal) {
+            onTranscript?.(text)
+          } else {
+            onInterimTranscript?.(text)
+          }
+          return
+        }
+
+        if (isFinal) {
+          onTranscript?.(text)
+          const command = parseVoiceCommand(text)
+          handleCommand(command)
+        } else {
+          onInterimTranscript?.(text)
+        }
+      },
+      onError: (err) => {
+        console.error('[RealtimeVoice] Error:', err)
+      },
+      autoStopOnFinal: !conversationMode,
+      inactivityTimeoutMs: conversationMode ? 60000 : 7000,
+      keepConnectionAliveMs: conversationMode ? 120000 : 120000,
+    })
+
+    const realtimeIsConnecting = useRealtime ? realtimeVoice.isConnecting : false
+    const realtimeIsSpeaking = useRealtime ? realtimeVoice.isSpeaking : false
 
     // Select active voice provider and normalize interface
     let isSupported: boolean
@@ -151,31 +217,27 @@ export const VoiceButton = forwardRef<VoiceButtonHandle, VoiceButtonProps>(
 
     if (useWhisper) {
       // Whisper API mode (for both command and conversation)
-      console.log('[VoiceButton] Using Whisper API')
       isSupported = whisperVoice.isSupported
       isListening = whisperVoice.isListening
       transcript = whisperVoice.transcript
       error = whisperVoice.error
       startListening = whisperVoice.startListening
       stopListening = whisperVoice.stopListening
-    } else if (conversationMode) {
-      // Browser conversation mode (only when no API key)
-      console.log('[VoiceButton] Using Browser for conversation')
-      isSupported = browserConversationVoice.isSupported
-      isListening = browserConversationVoice.isListening
-      transcript = browserConversationVoice.transcript
-      error = browserConversationVoice.error
-      startListening = browserConversationVoice.startListening
-      stopListening = browserConversationVoice.stopListening
+    } else if (useRealtime) {
+      isSupported = realtimeVoice.isSupported
+      isListening = realtimeVoice.isListening
+      transcript = realtimeVoice.transcript
+      error = realtimeVoice.error
+      startListening = realtimeVoice.startListening
+      stopListening = realtimeVoice.stopListening
     } else {
-      // Browser command mode
-      console.log('[VoiceButton] Using Browser for commands')
-      isSupported = browserCommandVoice.isSupported
-      isListening = browserCommandVoice.isListening
-      transcript = browserCommandVoice.transcript
-      error = browserCommandVoice.error
-      startListening = browserCommandVoice.startListening
-      stopListening = browserCommandVoice.stopListening
+      // Browser speech mode (command or conversation depending on prop)
+      isSupported = browserVoice.isSupported
+      isListening = browserVoice.isListening
+      transcript = browserVoice.transcript
+      error = browserVoice.error
+      startListening = browserVoice.startListening
+      stopListening = browserVoice.stopListening
     }
 
     const toggleListening = useCallback(() => {
@@ -194,13 +256,15 @@ export const VoiceButton = forwardRef<VoiceButtonHandle, VoiceButtonProps>(
       triggerVoice: () => {
         const provider = useWhisper
           ? 'whisper'
+          : useRealtime
+            ? 'openaiRealtime'
           : conversationMode
             ? 'browserConversation'
             : 'browserCommand'
         console.log('[VoiceButton] Triggered via ref. Mode:', { conversationMode, useWhisper, provider })
-        console.log('[VoiceButton] isListening:', isListening, 'isProcessing:', isProcessing)
+        console.log('[VoiceButton] isListening:', isListening, 'isProcessing:', isProcessing, 'isConnecting:', realtimeIsConnecting)
 
-        if (!isListening && !isProcessing) {
+        if (!isListening && !isProcessing && !realtimeIsConnecting) {
           if (startListening) {
             console.log('[VoiceButton] Calling startListening for provider:', provider)
             startListening()
@@ -214,33 +278,186 @@ export const VoiceButton = forwardRef<VoiceButtonHandle, VoiceButtonProps>(
       },
       stopVoice: () => {
         console.log('[VoiceButton] Stop voice called via ref. isListening:', isListening)
-        if (isListening && stopListening) {
+        if (stopListening) {
           stopListening()
         }
-      }
-    }), [isListening, isProcessing, startListening, stopListening, toggleListening, conversationMode, useWhisper])
-
-    // Auto-trigger when wake word is triggered
-    useEffect(() => {
-      if (wakeWordTriggered && !isListening && !isProcessing) {
-        console.log('[VoiceButton] Wake word triggered - starting voice')
-        if (startListening) {
-          startListening()
-        } else {
-          toggleListening()
+      },
+      speakText: (text, options = {}) => {
+        let started = false
+        const startOnce = () => {
+          if (started) return
+          started = true
+          options.onStart?.()
         }
-      }
-    }, [wakeWordTriggered, isListening, isProcessing, startListening, toggleListening])
 
-    // Call onEnd when listening stops (also when transcript is empty)
+        let completed = false
+        const completeOnce = () => {
+          if (completed) return
+          completed = true
+          options.onComplete?.()
+        }
+
+        if (useRealtime) {
+          void realtimeVoice.speakText?.(text, {
+            onStart: startOnce,
+            onComplete: completeOnce,
+          }).then((ok) => {
+            if (ok) return
+            startOnce()
+            speak(text, {
+              rate: options.rate,
+              pitch: options.pitch,
+              onComplete: completeOnce,
+            })
+          })
+          return true
+        }
+
+        speak(text, {
+          rate: options.rate,
+          pitch: options.pitch,
+          onComplete: completeOnce,
+        })
+        return false
+      },
+    }), [
+      conversationMode,
+      isListening,
+      isProcessing,
+      realtimeIsConnecting,
+      realtimeVoice.speakText,
+      speak,
+      startListening,
+      stopListening,
+      toggleListening,
+      useRealtime,
+      useWhisper,
+    ])
+
+    const triggerFromWakeWord = useCallback(() => {
+      if (isListening || isProcessing || realtimeIsConnecting) {
+        return
+      }
+      console.log('[VoiceButton] Wake word triggered - starting voice')
+      if (startListening) {
+        startListening()
+      } else {
+        toggleListening()
+      }
+    }, [isListening, isProcessing, realtimeIsConnecting, startListening, toggleListening])
+
+    // Auto-trigger when wake word is triggered (legacy boolean support)
     useEffect(() => {
-      if (!isListening && !isProcessing) {
+      if (!wakeWordTriggered) {
+        wakeWordTriggerConsumedRef.current = false
+        return
+      }
+
+      if (wakeWordTriggerConsumedRef.current) {
+        return
+      }
+
+      wakeWordTriggerConsumedRef.current = true
+      triggerFromWakeWord()
+    }, [wakeWordTriggered, triggerFromWakeWord])
+
+    // Preferred wake-word trigger mechanism: incrementing token (one-shot, no sticky booleans).
+    useEffect(() => {
+      if (!wakeWordTriggerToken) return
+      if (wakeWordTriggerToken === lastWakeWordTriggerTokenRef.current) return
+      lastWakeWordTriggerTokenRef.current = wakeWordTriggerToken
+      triggerFromWakeWord()
+    }, [triggerFromWakeWord, wakeWordTriggerToken])
+
+    // If conversation mode ended, ensure continuous realtime capture is stopped
+    // so wake-word listening can resume cleanly.
+    const wasConversationModeRef = useRef(conversationMode)
+    useEffect(() => {
+      if (
+        wasConversationModeRef.current &&
+        !conversationMode &&
+        useRealtime &&
+        isListening
+      ) {
+        stopListening()
+      }
+      wasConversationModeRef.current = conversationMode
+    }, [conversationMode, isListening, stopListening, useRealtime])
+
+    // Pre-warm realtime session when conversation flow starts, so the first answer opens instantly.
+    useEffect(() => {
+      if (!useRealtime || !conversationMode) return
+      void realtimeVoice.prepareSession?.()
+    }, [useRealtime, conversationMode, realtimeVoice.prepareSession])
+
+    // Call onEnd only on active -> idle transition.
+    // Prevents repeated "Voice ended" loops while already idle.
+    useEffect(() => {
+      const isActiveNow = isListening || isProcessing || realtimeIsConnecting || realtimeIsSpeaking
+
+      if (isActiveNow) {
+        wasVoiceActiveRef.current = true
+        return
+      }
+
+      if (wasVoiceActiveRef.current) {
+        wasVoiceActiveRef.current = false
         const timeout = setTimeout(() => {
           handleEnd()
-        }, transcript ? 500 : 200)
+        }, conversationMode ? 0 : transcript ? 500 : 200)
         return () => clearTimeout(timeout)
       }
-    }, [isListening, isProcessing, transcript, handleEnd])
+    }, [conversationMode, isListening, isProcessing, realtimeIsConnecting, realtimeIsSpeaking, transcript, handleEnd])
+
+    const interaction = useMemo((): { state: VoiceInteractionState; detail?: string } => {
+      if (error && !isListening && !isProcessing) {
+        return { state: 'error', detail: error }
+      }
+
+      if (isProcessing) {
+        return { state: 'processing', detail: 'Processing transcript...' }
+      }
+
+      if (realtimeIsConnecting) {
+        return { state: 'connecting', detail: 'Connecting to realtime...' }
+      }
+
+      if (realtimeIsSpeaking) {
+        return { state: 'speaking', detail: 'Assistant speaking...' }
+      }
+
+      if (isListening) {
+        if (conversationMode) {
+          return { state: 'flow_active', detail: 'Listening for your answer...' }
+        }
+        return { state: 'listening', detail: 'Listening for command...' }
+      }
+
+      if (conversationMode) {
+        return { state: 'flow_active', detail: 'Voice flow active' }
+      }
+
+      if (wakeWordActive) {
+        return { state: 'wake_ready', detail: `Say "${wakeWordLabel}"` }
+      }
+
+      return { state: 'idle', detail: useRealtime ? 'Realtime ready' : useWhisper ? 'Whisper ready' : 'Tap to speak' }
+    }, [
+      conversationMode,
+      error,
+      isListening,
+      isProcessing,
+      realtimeIsConnecting,
+      realtimeIsSpeaking,
+      useRealtime,
+      useWhisper,
+      wakeWordActive,
+      wakeWordLabel,
+    ])
+
+    useEffect(() => {
+      onInteractionStateChange?.(interaction.state, interaction.detail)
+    }, [interaction.detail, interaction.state, onInteractionStateChange])
 
     const sizeClasses = {
       sm: 'w-12 h-12',
@@ -274,12 +491,14 @@ export const VoiceButton = forwardRef<VoiceButtonHandle, VoiceButtonProps>(
         <div className="relative">
           <button
             onClick={toggleListening}
-            disabled={isProcessing}
+            disabled={isProcessing || realtimeIsConnecting}
             className={cn(
               'voice-button rounded-full flex items-center justify-center transition-all duration-200',
               sizeClasses[size],
-              isProcessing
+              isProcessing || realtimeIsConnecting
                 ? 'bg-purple-500 shadow-lg shadow-purple-500/50'
+                : realtimeIsSpeaking
+                  ? 'bg-amber-500 shadow-lg shadow-amber-500/50'
                 : isListening
                   ? 'voice-listening bg-green-500 shadow-lg shadow-green-500/50'
                   : wakeWordActive
@@ -290,8 +509,10 @@ export const VoiceButton = forwardRef<VoiceButtonHandle, VoiceButtonProps>(
             )}
             aria-label={isListening ? 'Stop listening' : 'Start voice command'}
           >
-            {isProcessing ? (
+            {isProcessing || realtimeIsConnecting ? (
               <Loader2 className={cn(iconSizes[size], 'text-white animate-spin')} />
+            ) : realtimeIsSpeaking ? (
+              <Volume2 className={cn(iconSizes[size], 'text-white animate-pulse')} />
             ) : isListening ? (
               <Volume2 className={cn(iconSizes[size], 'text-white animate-pulse')} />
             ) : wakeWordActive ? (
@@ -301,7 +522,7 @@ export const VoiceButton = forwardRef<VoiceButtonHandle, VoiceButtonProps>(
             )}
           </button>
           {/* Wake word indicator dot */}
-          {wakeWordActive && !isListening && !isProcessing && (
+          {wakeWordActive && !isListening && !isProcessing && !realtimeIsConnecting && !realtimeIsSpeaking && (
             <div className="absolute -top-1 -right-1 w-3 h-3 bg-rose-500 rounded-full animate-pulse" />
           )}
         </div>
@@ -321,12 +542,14 @@ export const VoiceButton = forwardRef<VoiceButtonHandle, VoiceButtonProps>(
         {/* Main Voice Button */}
         <button
           onClick={toggleListening}
-          disabled={isProcessing}
+          disabled={isProcessing || realtimeIsConnecting}
           className={cn(
             'voice-button rounded-full flex items-center justify-center transition-all duration-200',
             sizeClasses[size],
-            isProcessing
+            isProcessing || realtimeIsConnecting
               ? 'bg-purple-500 shadow-lg shadow-purple-500/50'
+              : realtimeIsSpeaking
+                ? 'bg-amber-500 shadow-lg shadow-amber-500/50'
               : isListening
                 ? 'voice-listening bg-green-500 shadow-lg shadow-green-500/50'
                 : wakeWordActive
@@ -336,8 +559,10 @@ export const VoiceButton = forwardRef<VoiceButtonHandle, VoiceButtonProps>(
           )}
           aria-label={isListening ? 'Stop listening' : 'Start voice command'}
         >
-          {isProcessing ? (
+          {isProcessing || realtimeIsConnecting ? (
             <Loader2 className={cn(iconSizes[size], 'text-white animate-spin')} />
+          ) : realtimeIsSpeaking ? (
+            <Volume2 className={cn(iconSizes[size], 'text-white animate-pulse')} />
           ) : isListening ? (
             <Volume2 className={cn(iconSizes[size], 'text-white animate-pulse')} />
           ) : wakeWordActive ? (
@@ -349,9 +574,14 @@ export const VoiceButton = forwardRef<VoiceButtonHandle, VoiceButtonProps>(
 
         {/* Status Text */}
         <div className="text-center min-h-[60px]">
-          {isProcessing && (
+          {(isProcessing || realtimeIsConnecting) && (
             <p className="text-purple-400 font-medium">
-              🔄 Processing...
+              🔄 {realtimeIsConnecting ? 'Connecting...' : 'Processing...'}
+            </p>
+          )}
+          {realtimeIsSpeaking && !isProcessing && !realtimeIsConnecting && (
+            <p className="text-amber-400 font-medium animate-pulse">
+              🔊 Speaking...
             </p>
           )}
           {isListening && !isProcessing && (
@@ -367,16 +597,22 @@ export const VoiceButton = forwardRef<VoiceButtonHandle, VoiceButtonProps>(
           {error && !isListening && !isProcessing && (
             <div className="text-amber-400 text-sm max-w-[240px]">
               <p>⚠️ {error}</p>
-              {settings.voiceProvider !== 'browser' && !whisperVoice.isConfigured && (
+              {settings.voiceProvider === 'whisper' && !whisperVoice.isConfigured && (
                 <p className="mt-1 text-xs text-amber-300">
-                  Add your API key in Settings → Voice Control.
+                  Voice service not configured. Check Settings.
                 </p>
               )}
             </div>
           )}
-          {!isListening && !transcript && !error && !isProcessing && (
+          {!isListening && !transcript && !error && !isProcessing && !realtimeIsConnecting && !realtimeIsSpeaking && (
             <p className="text-theme-muted text-sm">
-              {wakeWordActive ? `Listening for "${wakeWordLabel}"` : useWhisper ? 'Tap to record' : 'Tap to speak'}
+              {wakeWordActive
+                ? `Listening for "${wakeWordLabel}"`
+                : useWhisper
+                  ? 'Tap to record'
+                  : useRealtime
+                    ? 'Realtime listening'
+                    : 'Tap to speak'}
             </p>
           )}
         </div>
@@ -387,7 +623,7 @@ export const VoiceButton = forwardRef<VoiceButtonHandle, VoiceButtonProps>(
           <p>"Start cooling [item]"</p>
           <p>"Done" or "In fridge"</p>
           <p>"Discard"</p>
-          {useWhisper && (
+          {(useWhisper || useRealtime) && (
             <p className="mt-2 text-purple-400">Using {providerLabel}</p>
           )}
         </div>
@@ -403,16 +639,38 @@ export function VoiceButtonInline({
 }: Omit<VoiceButtonProps, 'size' | 'onEnd' | 'wakeWordActive' | 'wakeWordTriggered'>) {
   const { settings } = useAppStore()
 
-  // Use API voice if OpenAI or OpenRouter is configured with API key
-  const useWhisper = (settings.voiceProvider === 'openai' && settings.openaiApiKey) ||
-    (settings.voiceProvider === 'openrouter' && settings.openrouterApiKey)
+  // Use Whisper (Edge Function) when selected — no API key needed
+  const useWhisper = settings.voiceProvider === 'whisper'
+  const useRealtime = settings.voiceProvider === 'realtime'
 
-  const browserVoice = useVoiceRecognition({ onCommand })
+  const browserVoice = useBrowserSpeech({
+    onTranscript: (text, isFinal) => {
+      if (!isFinal) return
+      const command = parseVoiceCommand(text)
+      onCommand(command)
+    },
+    silenceTimeout: 4500,
+    postSpeechTimeout: 1300,
+  })
   const whisperVoice = useWhisperVoice({ onCommand })
+  const realtimeVoice = useRealtimeVoice({
+    onTranscript: (text, isFinal) => {
+      if (!isFinal) return
+      const command = parseVoiceCommand(text)
+      onCommand(command)
+    },
+  })
 
-  const voice = useWhisper ? whisperVoice : browserVoice
-  const { isSupported, isListening, toggleListening } = voice
+  const voice = useWhisper ? whisperVoice : useRealtime ? realtimeVoice : browserVoice
+  const { isSupported, isListening } = voice
   const isProcessing = useWhisper ? whisperVoice.isProcessing : false
+  const toggleListening = useCallback(() => {
+    if (isListening) {
+      voice.stopListening()
+    } else {
+      voice.startListening()
+    }
+  }, [isListening, voice])
 
   if (!isSupported && !useWhisper) return null
 

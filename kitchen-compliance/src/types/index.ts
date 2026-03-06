@@ -20,15 +20,19 @@ export const STAFF_ROLES: { id: StaffRole; label: string; color: string }[] = [
 ]
 
 // Staff member for selection
+// Staff member for selection
 export interface StaffMember {
   id: string
   site_id: string
   name: string
-  initials: string
+  initials: string | null
   role: StaffRole
-  active: boolean
+  active: boolean | null
   staff_code?: string | null
+  pin_hash?: string | null
+  email?: string | null
   created_at: string
+  updated_at?: string
 }
 
 // Cooling session represents an active or completed cooling workflow

@@ -10,6 +10,8 @@ import { StatusHeader } from '@/components/layout/StatusHeader'
 import { useAppStore, getActiveSessions, getOverdueSessions, WAKE_WORD_OPTIONS } from '@/store/useAppStore'
 import { useCoolingWorkflow } from '@/services/coolingService'
 import type { FoodItemPreset, VoiceCommand, CoolingSession, CloseCoolingData } from '@/types'
+import { useCoolingSessions } from '@/hooks/queries/useCooling'
+import { useStaff } from '@/hooks/queries/useStaff'
 import { useTextToSpeech } from '@/hooks/useVoiceRecognition'
 import { useVoiceCloseFlow } from '@/hooks/useVoiceCloseFlow'
 import { useWakeWord, playWakeSound, getPrimaryWakeWordLabel } from '@/hooks/useWakeWord'
@@ -29,7 +31,9 @@ export function KioskHome({
   const [wakeWordTriggered, setWakeWordTriggered] = useState(false)
   const [isFridgeTempModalOpen, setIsFridgeTempModalOpen] = useState(false)
 
-  const { coolingSessions, settings, staffMembers } = useAppStore()
+  const { settings, currentSite } = useAppStore()
+  const { data: coolingSessions = [] } = useCoolingSessions(currentSite?.id)
+  const { data: staffMembers = [] } = useStaff(currentSite?.id)
   const { startCooling, closeCooling, discardCooling, updateSessionStatuses } = useCoolingWorkflow()
   const { speak } = useTextToSpeech()
 
@@ -126,6 +130,8 @@ export function KioskHome({
     onStopListening: handleStopListening, // Stop listening immediately when valid input detected
   })
 
+  const isFlowActive = voiceCloseFlow.step !== 'idle'
+
   // Handle confirming close
   const handleConfirmClose = useCallback(
     async (data: CloseCoolingData) => {
@@ -185,16 +191,22 @@ export function KioskHome({
   const handleImmediateCommand = useCallback((command: string) => {
     console.log('[KioskHome] Immediate command after wake word:', command)
     const parsedCommand = parseVoiceCommand(command)
-    if (parsedCommand.type !== 'unknown') {
-      handleVoiceCommandRef.current(parsedCommand)
+    if (parsedCommand.type === 'noise' || parsedCommand.type === 'unknown') {
+      console.log('[KioskHome] Immediate command noisy/incomplete, falling back to command capture')
+      if (voiceButtonRef.current) {
+        voiceButtonRef.current.triggerVoice()
+      }
+      return
     }
+
+    handleVoiceCommandRef.current(parsedCommand)
   }, [])
 
   const { isActive: isWakeWordActive, resumeListening } = useWakeWord({
     onWakeWordHeard: handleWakeWordHeard,
     onWakeWordDetected: handleWakeWordDetected,
     onCommandDetected: handleImmediateCommand,
-    enabled: settings.wakeWordEnabled,
+    enabled: settings.wakeWordEnabled && !isFlowActive,
     language: settings.language === 'en' ? 'en-IE' : settings.language,
     wakeWords: activeWakeWordPhrases,
   })

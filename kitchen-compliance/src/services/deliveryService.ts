@@ -156,7 +156,13 @@ export async function createGoodsReceipt(
     }
 
     // Insert goods receipt using db (typed as any to bypass type issues)
-    console.log('📦 Creating goods receipt with data:', JSON.stringify(receiptData, null, 2))
+    if (import.meta.env.DEV) {
+      console.log('📦 Creating goods receipt:', {
+        siteId: input.siteId,
+        supplierName: input.supplierName,
+        itemCount: items.length,
+      })
+    }
     
     const { data: receipt, error: receiptError } = await db
       .from('goods_receipts')

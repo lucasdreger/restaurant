@@ -249,26 +249,30 @@ export function useTextToSpeech() {
   const { settings } = useAppStore()
 
   // Configure TTS service on mount/settings change
+  // No API key needed — Edge Function handles that server-side
   useEffect(() => {
     ttsService.configure({
-      apiKey: settings.openaiApiKey || undefined,
-      useOpenAI: settings.voiceProvider === 'openai' && settings.ttsEnabled,
-      voice: 'alloy' // Always use a valid TTS voice model, ignoring STT model setting
+      useOpenAI: settings.voiceProvider !== 'browser' && settings.ttsEnabled,
+      voice: 'alloy' // Always use a valid TTS voice model
     })
-  }, [settings.openaiApiKey, settings.voiceProvider, settings.ttsEnabled, settings.audioModel])
+  }, [settings.voiceProvider, settings.ttsEnabled])
 
   useEffect(() => {
     setIsSupported('speechSynthesis' in window)
   }, [])
 
   const speak = useCallback(
-    (text: string, options: { rate?: number; pitch?: number; onComplete?: () => void } = {}) => {
+    (
+      text: string,
+      options: { rate?: number; pitch?: number; onComplete?: () => void; preferBrowser?: boolean } = {}
+    ) => {
       // Don't block if already speaking, queue it (service handles queuing)
       // if (!isSupported || isSpeaking) return
 
       ttsService.speak(text, {
         rate: options.rate,
         pitch: options.pitch,
+        preferBrowser: options.preferBrowser,
         onStart: () => setIsSpeaking(true),
         onEnd: () => {
           setIsSpeaking(false)

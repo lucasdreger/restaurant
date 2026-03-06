@@ -14,7 +14,8 @@ import {
   Package,
   Menu,
   X,
-  LogOut
+  LogOut,
+  LayoutDashboard
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAppStore } from '@/store/useAppStore'
@@ -198,13 +199,30 @@ export function Sidebar({ currentScreen, onNavigate, siteName = 'Kitchen Ops' }:
         })}
       </nav>
 
+      {/* Admin Link (Dev) */}
+      <div className="px-4 pb-2 mt-auto">
+        <a
+          href="/admin"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left text-theme-secondary hover:bg-theme-ghost hover:text-theme-primary transition-all duration-150 group"
+        >
+          <div className="p-2 rounded-lg bg-theme-ghost group-hover:bg-indigo-500/10 transition-colors">
+            <LayoutDashboard className="w-4 h-4 group-hover:text-indigo-500 transition-colors" />
+          </div>
+          <span className="font-medium text-sm">Admin Dashboard</span>
+        </a>
+      </div>
+
       {/* Logout Button */}
       <div className="px-4 pb-2">
         <button
           onClick={async () => {
             const { supabase } = await import('@/lib/supabase')
+            const { clearKitchenComplianceAppStorage } = await import('@/lib/appStorage')
             await supabase.auth.signOut()
-            localStorage.clear() // Clear all app state
+            // Clear only app state; never nuke all localStorage (it breaks remembered email + auth edge cases)
+            clearKitchenComplianceAppStorage()
             window.location.reload() // Force reload to ensure clean slate
           }}
           className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left text-theme-secondary hover:bg-red-500/10 hover:text-red-500 transition-all duration-150 group"

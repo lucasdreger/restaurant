@@ -2,6 +2,7 @@ import { useState, useCallback, useMemo } from 'react'
 import { X, Snowflake, Thermometer, User, CheckCircle, AlertTriangle } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { useAppStore } from '@/store/useAppStore'
+import { useStaff } from '@/hooks/queries/useStaff'
 import type { CoolingSession, CloseCoolingData, StaffMember } from '@/types'
 import { cn, formatTime, getTimeDifferenceSeconds } from '@/lib/utils'
 
@@ -25,7 +26,8 @@ export function CloseCoolingModal({
   preselectedStaffId,
   preselectedTemperature,
 }: CloseCoolingModalProps) {
-  const { staffMembers } = useAppStore()
+  const { currentSite } = useAppStore()
+  const { data: staffMembers = [] } = useStaff(currentSite?.id)
   const initialPreselectedTemperature = preselectedTemperature ?? null
   const initialIsPreset =
     initialPreselectedTemperature !== null && TEMP_PRESETS.includes(initialPreselectedTemperature)

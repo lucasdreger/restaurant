@@ -4,12 +4,47 @@ import tailwindcss from '@tailwindcss/vite'
 import path from 'path'
 
 // https://vite.dev/config/
-export default defineConfig({
-  // Base path for GitHub Pages deployment
-  base: '/restaurant/',
+export default defineConfig(({ command }) => ({
+  // Dev: keep root base to avoid redirect loops.
+  // Build: keep /restaurant for GitHub Pages deployment.
+  base: command === 'serve' ? '/' : '/restaurant/',
   plugins: [
     react(),
     tailwindcss(),
+    {
+      name: 'restaurant-path-middleware',
+      configureServer(server) {
+        server.middlewares.use((req, res, next) => {
+          if (!req.url) {
+            next()
+            return
+          }
+
+          // Keep explicit app entrypoints on same host:
+          // /restaurant for product app, /admin for admin app.
+          if (req.url === '/') {
+            res.statusCode = 302
+            res.setHeader('Location', '/restaurant/')
+            res.end()
+            return
+          }
+
+          if (req.url === '/restaurant') {
+            res.statusCode = 302
+            res.setHeader('Location', '/restaurant/')
+            res.end()
+            return
+          }
+
+          // In dev, strip /restaurant prefix so Vite resolves the SPA at root.
+          if (req.url.startsWith('/restaurant/')) {
+            req.url = req.url.replace(/^\/restaurant/, '') || '/'
+          }
+
+          next()
+        })
+      },
+    },
     // PWA disabled for now - icons need to be created first
     // To enable PWA:
     // 1. Create pwa-192x192.png and pwa-512x512.png in public/ folder
@@ -22,7 +57,13 @@ export default defineConfig({
   },
   server: {
     host: true, // Expõe para todos os IPs da rede
-    port: 5173  // Porta padrão (pode mudar se necessário)
+    port: 5173,  // Porta padrão (pode mudar se necessário)
+    proxy: {
+      '/admin': {
+        target: 'http://localhost:5174',
+        changeOrigin: true,
+      },
+    },
   },
   build: {
     // Enable source maps for debugging in production (optional)
@@ -53,4 +94,4 @@ export default defineConfig({
   optimizeDeps: {
     include: ['react', 'react-dom', 'zustand', '@supabase/supabase-js', 'lucide-react']
   }
-})
+}))

@@ -7,9 +7,10 @@ import {
   Tag, Beef, Calendar, Hash
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { useAppStore, type OCRModel } from '@/store/useAppStore'
+import { useAppStore } from '@/store/useAppStore'
+import { useStaff } from '@/hooks/queries/useStaff'
 import { toast } from 'sonner'
-import { processInvoiceImage, isProviderAvailable, OCR_MODEL_INFO } from '@/services/ocrService'
+import { processInvoiceImage } from '@/services/ocrService'
 import {
   createGoodsReceipt,
   uploadDeliveryImage,
@@ -110,7 +111,8 @@ const INITIAL_RECEIPT: ReceiptData = {
 }
 
 export function GoodsReceiptScreen({ onBack, onNavigate }: GoodsReceiptScreenProps) {
-  const { staffMembers, settings, currentSite } = useAppStore()
+  const { currentSite } = useAppStore()
+  const { data: staffMembers = [] } = useStaff(currentSite?.id)
   const [receipt, setReceipt] = useState<ReceiptData>(INITIAL_RECEIPT)
   const [isScanning, setIsScanning] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -136,15 +138,8 @@ export function GoodsReceiptScreen({ onBack, onNavigate }: GoodsReceiptScreenPro
   const labelCameraRef = useRef<HTMLInputElement>(null)
   const labelFileRef = useRef<HTMLInputElement>(null)
 
-  // Get current OCR settings
-  const ocrProvider = settings.ocrProvider || 'openrouter'
-  const ocrModel = settings.ocrModel || 'google/gemini-2.0-flash'
-  const isOcrConfigured = isProviderAvailable(ocrProvider, {
-    openaiApiKey: settings.openaiApiKey,
-    openrouterApiKey: settings.openrouterApiKey,
-  })
-
-  const modelInfo = OCR_MODEL_INFO[ocrModel]
+  // OCR is always available when authenticated (keys are server-side)
+  const isOcrConfigured = true
 
   // Process a single page with OCR
   const processPage = async (page: ScannedPage, file: File) => {
@@ -168,12 +163,7 @@ export function GoodsReceiptScreen({ onBack, onNavigate }: GoodsReceiptScreenPro
 
       const ocrResultData = await processInvoiceImage(
         fileToProcess,
-        {
-          provider: ocrProvider,
-          model: ocrModel,
-          openaiApiKey: settings.openaiApiKey,
-          openrouterApiKey: settings.openrouterApiKey,
-        },
+        currentSite?.id,
         (progress, status) => {
           // Scale progress from 10-100
           const scaledProgress = 10 + Math.round(progress * 0.9)
@@ -212,7 +202,7 @@ export function GoodsReceiptScreen({ onBack, onNavigate }: GoodsReceiptScreenPro
         setOcrConfidence(ocrResultData.confidence)
         setOcrResult({ provider: ocrResultData.provider, model: ocrResultData.model })
 
-        const providerName = OCR_MODEL_INFO[ocrResultData.model as OCRModel]?.name || ocrResultData.model
+        const providerName = ocrResultData.model || 'AI'
         toast.success(`Page ${page.pageNumber}: ${itemsWithCategory.length} items extracted via ${providerName}`)
       }
     } catch (error) {
@@ -603,11 +593,10 @@ export function GoodsReceiptScreen({ onBack, onNavigate }: GoodsReceiptScreenPro
             <div className="flex items-center gap-2">
               <div className={cn(
                 "flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium",
-                ocrProvider === 'openrouter' ? "bg-purple-500/20 text-purple-400" :
-                  "bg-sky-500/20 text-sky-400"
+                "bg-purple-500/20 text-purple-400"
               )}>
                 <Zap className="w-3.5 h-3.5" />
-                {modelInfo?.name || ocrModel}
+                AI OCR (Edge Function)
               </div>
 
               {onNavigate && (
@@ -761,7 +750,7 @@ export function GoodsReceiptScreen({ onBack, onNavigate }: GoodsReceiptScreenPro
                     <AlertTriangle className="w-4 h-4" />
                   )}
                   <span>
-                    {OCR_MODEL_INFO[ocrResult.model as OCRModel]?.name || ocrResult.model}: {ocrConfidence.toFixed(0)}% confidence
+                    {ocrResult.model}: {ocrConfidence.toFixed(0)}% confidence
                     {ocrConfidence <= 70 && ' - Please verify extracted data'}
                   </span>
                 </div>

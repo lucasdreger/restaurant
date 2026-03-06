@@ -1,5 +1,6 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import type { CloseCoolingData, CoolingSession, StaffMember } from '@/types'
+import { VOICE_LIMITS } from '@/lib/voiceConfig'
 
 type VoiceCloseStep = 'idle' | 'awaiting_staff' | 'awaiting_temperature' | 'awaiting_confirmation'
 
@@ -24,19 +25,73 @@ interface VoiceCloseFlowState {
 const TEXT_NUMBERS: Record<string, number> = {
   'zero': 0, 'one': 1, 'two': 2, 'three': 3, 'four': 4,
   'five': 5, 'six': 6, 'seven': 7, 'eight': 8, 'nine': 9, 'ten': 10,
+  'eleven': 11, 'twelve': 12, 'thirteen': 13, 'fourteen': 14, 'fifteen': 15,
+  'sixteen': 16, 'seventeen': 17, 'eighteen': 18, 'nineteen': 19,
+  'twenty': 20, 'thirty': 30, 'forty': 40, 'fifty': 50, 'sixty': 60,
+  'seventy': 70, 'eighty': 80, 'ninety': 90,
+}
+
+const HOMOPHONE_NUMBERS: Record<string, number> = {
+  'won': 1,
+  'to': 2,
+  'too': 2,
+  'tree': 3,
+  'free': 3,
+  'for': 4,
+  'fore': 4,
+  'ate': 8,
+  'oh': 0,
 }
 
 function findNumber(text: string): number | null {
-  const lower = text.toLowerCase().trim()
+  const lower = text
+    .toLowerCase()
+    .replace(/[^\w\s-]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
 
   // Try direct numeric match first
   const match = lower.match(/-?\d+(?:\.\d+)?/)
   if (match) return Number(match[0])
 
+  // Handle "minus one" / "negative one"
+  const negative = /\b(minus|negative)\b/.test(lower)
+
+  // Handle "one point five" / "one dot five"
+  const pointMatch = lower.match(/\b([a-z]+)\s+(?:point|dot)\s+([a-z]+)\b/)
+  if (pointMatch) {
+    const a = TEXT_NUMBERS[pointMatch[1]]
+    const b = TEXT_NUMBERS[pointMatch[2]]
+    if (typeof a === 'number' && typeof b === 'number') {
+      const val = Number(`${a}.${b}`)
+      return negative ? -val : val
+    }
+  }
+
+  // Handle simple composite like "twenty one"
+  const compositeMatch = lower.match(/\b(twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)\s+(one|two|three|four|five|six|seven|eight|nine)\b/)
+  if (compositeMatch) {
+    const tens = TEXT_NUMBERS[compositeMatch[1]]
+    const ones = TEXT_NUMBERS[compositeMatch[2]]
+    if (typeof tens === 'number' && typeof ones === 'number') {
+      const val = tens + ones
+      return negative ? -val : val
+    }
+  }
+
   // Try text number match with word boundaries
   for (const [word, val] of Object.entries(TEXT_NUMBERS)) {
     const regex = new RegExp(`\\b${word}\\b`, 'i')
-    if (regex.test(lower)) return val
+    if (regex.test(lower)) return negative ? -val : val
+  }
+
+  // Handle common ASR homophones in noisy kitchens ("for" -> 4)
+  const words = lower.split(/\s+/).filter(Boolean)
+  for (const word of words) {
+    if (word in HOMOPHONE_NUMBERS) {
+      const value = HOMOPHONE_NUMBERS[word]
+      return negative ? -value : value
+    }
   }
 
   return null
@@ -45,6 +100,23 @@ function findNumber(text: string): number | null {
 function shouldSkipTemperature(text: string) {
   const lower = text.toLowerCase()
   return lower.includes('skip') || lower.includes('no temp') || lower.includes('no temperature') || lower.includes('without')
+}
+
+function normalizeVoiceInput(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/^(okay|ok|hey|hi)\s+luma\s*,?\s*/i, '')
+    .replace(/[^\w\s.-]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function isNegativeResponse(text: string): boolean {
+  return /\b(no|wrong|change|incorrect|not correct)\b/i.test(text)
+}
+
+function isPositiveConfirmation(text: string): boolean {
+  return /\b(confirm|save|yes|ok|okay|correct)\b/i.test(text)
 }
 
 export function useVoiceCloseFlow({
@@ -61,6 +133,12 @@ export function useVoiceCloseFlow({
     step: 'idle',
     sessionId: null,
     staffId: null,
+  })
+  const retryRef = useRef<Record<VoiceCloseStep, number>>({
+    idle: 0,
+    awaiting_staff: 0,
+    awaiting_temperature: 0,
+    awaiting_confirmation: 0,
   })
 
   const activeStaff = useMemo(() => staffMembers.filter((staff) => staff.active), [staffMembers])
@@ -89,7 +167,35 @@ export function useVoiceCloseFlow({
 
   const reset = useCallback(() => {
     setState({ step: 'idle', sessionId: null, staffId: null })
+    retryRef.current = {
+      idle: 0,
+      awaiting_staff: 0,
+      awaiting_temperature: 0,
+      awaiting_confirmation: 0,
+    }
   }, [])
+
+  const promptRetryOrFallback = useCallback(
+    (step: VoiceCloseStep, retryPrompt: string) => {
+      retryRef.current[step] = (retryRef.current[step] ?? 0) + 1
+      const attempts = retryRef.current[step]
+
+      if (attempts >= VOICE_LIMITS.MAX_RETRIES_PER_STEP) {
+        speak('I could not validate this step after several tries. Please complete it on screen.', {
+          onComplete: () => {
+            // Keep modal open for touch fallback, but end voice flow.
+            reset()
+          }
+        })
+        return
+      }
+
+      speak(retryPrompt, {
+        onComplete: () => onAwaitingInput?.()
+      })
+    },
+    [onAwaitingInput, reset, speak]
+  )
 
   const startFlow = useCallback(
     (item?: string) => {
@@ -100,6 +206,7 @@ export function useVoiceCloseFlow({
       }
       onOpenModal(session.id)
       setState({ step: 'awaiting_staff', sessionId: session.id, staffId: null })
+      retryRef.current.awaiting_staff = 0
       speak(`Closing ${session.item_name}. What is your staff code?`, {
         onComplete: () => onAwaitingInput?.()
       })
@@ -116,9 +223,7 @@ export function useVoiceCloseFlow({
       }
 
       // Natural interaction: remove wake words if user accidentally says them again
-      const cleaned = transcript.toLowerCase()
-        .replace(/^(okay|ok|hey|hi)\s+luma\s*,?\s*/i, '')
-        .trim()
+      const cleaned = normalizeVoiceInput(transcript)
 
       console.log(`[VoiceCloseFlow] Step: ${state.step}, Raw: "${transcript}", Cleaned: "${cleaned}"`)
 
@@ -136,9 +241,7 @@ export function useVoiceCloseFlow({
 
         if (!staffCode) {
           console.log('[VoiceCloseFlow] No code found in:', cleaned)
-          speak("I didn't catch a number. Please say your staff code.", {
-            onComplete: () => onAwaitingInput?.()
-          })
+          promptRetryOrFallback('awaiting_staff', "I didn't catch a number. Please say your staff code.")
           return
         }
 
@@ -148,13 +251,13 @@ export function useVoiceCloseFlow({
         )
 
         if (!staff) {
-          speak(`I could not find a staff member with code ${staffCode}. Please try again.`, {
-            onComplete: () => onAwaitingInput?.()
-          })
+          promptRetryOrFallback('awaiting_staff', `I could not find a staff member with code ${staffCode}. Please try again.`)
           return
         }
 
         setState((prev) => ({ ...prev, staffId: staff.id, step: 'awaiting_temperature' }))
+        retryRef.current.awaiting_staff = 0
+        retryRef.current.awaiting_temperature = 0
         speak(`Recognized ${staff.name}. What is the final temperature?`, {
           onComplete: () => onAwaitingInput?.()
         })
@@ -170,9 +273,11 @@ export function useVoiceCloseFlow({
         } else {
           const num = findNumber(cleaned)
           if (num === null || Number.isNaN(num)) {
-            speak('I didn\'t catch that temperature. Please say the number, or say skip.', {
-              onComplete: () => onAwaitingInput?.()
-            })
+            promptRetryOrFallback('awaiting_temperature', 'I did not catch that temperature. Please say the number, or say skip.')
+            return
+          }
+          if (num < -30 || num > 130) {
+            promptRetryOrFallback('awaiting_temperature', `That sounds out of range. I heard ${num}. Please repeat the temperature.`)
             return
           }
           temperatureValue = num
@@ -182,6 +287,8 @@ export function useVoiceCloseFlow({
         const sessionMatched = sessions.find((s) => s.id === state.sessionId)
 
         setState((prev) => ({ ...prev, temperature: temperatureValue, step: 'awaiting_confirmation' }))
+        retryRef.current.awaiting_temperature = 0
+        retryRef.current.awaiting_confirmation = 0
 
         const tempText = temperatureValue !== undefined ? `${temperatureValue} degrees celsius` : 'temperature skipped'
         speak(`Summary: ${sessionMatched?.item_name || 'Item'}, by ${staffMatched?.name || 'staff'}, ${tempText}. Say confirm to save, or cancel.`, {
@@ -192,8 +299,7 @@ export function useVoiceCloseFlow({
 
       // 3. Handling Final Confirmation
       if (state.step === 'awaiting_confirmation') {
-        const isConfirm = cleaned.includes('confirm') || cleaned.includes('save') ||
-          cleaned.includes('yes') || cleaned.includes('ok')
+        const isConfirm = isPositiveConfirmation(cleaned)
 
         if (isConfirm) {
           if (state.sessionId) {
@@ -209,13 +315,18 @@ export function useVoiceCloseFlow({
           onCloseModal?.()
           return
         }
-
-        speak('I didn\'t get that. Say confirm to save the record, or cancel.', {
-          onComplete: () => onAwaitingInput?.()
-        })
+        if (isNegativeResponse(cleaned)) {
+          setState((prev) => ({ ...prev, step: 'awaiting_temperature' }))
+          retryRef.current.awaiting_confirmation = 0
+          speak('Okay, let us correct it. What is the final temperature?', {
+            onComplete: () => onAwaitingInput?.()
+          })
+          return
+        }
+        promptRetryOrFallback('awaiting_confirmation', 'I did not get that. Say confirm to save the record, or cancel.')
       }
     },
-    [state, activeStaff, sessions, onConfirm, onCloseModal, reset, speak, onAwaitingInput]
+    [state, activeStaff, sessions, onConfirm, onCloseModal, reset, speak, onAwaitingInput, promptRetryOrFallback]
   )
 
   /**
@@ -226,9 +337,7 @@ export function useVoiceCloseFlow({
     (transcript: string): boolean => {
       if (state.step === 'idle') return false
       
-      const cleaned = transcript.toLowerCase()
-        .replace(/^(okay|ok|hey|hi)\s+luma\s*,?\s*/i, '')
-        .trim()
+      const cleaned = normalizeVoiceInput(transcript)
       
       // Cancel/stop commands - stop immediately
       if (cleaned === 'cancel' || cleaned === 'stop' || cleaned === 'exit') {
@@ -236,40 +345,12 @@ export function useVoiceCloseFlow({
         onStopListening?.()
         return true
       }
-      
-      // Staff code step: stop as soon as we hear a number
-      if (state.step === 'awaiting_staff') {
-        const hasNumber = findNumber(cleaned) !== null
-        if (hasNumber) {
-          console.log('[VoiceCloseFlow] Interim: Detected number for staff code, stopping')
-          onStopListening?.()
-          return true
-        }
-      }
-      
-      // Temperature step: stop as soon as we hear a number or skip keywords
-      if (state.step === 'awaiting_temperature') {
-        const hasNumber = findNumber(cleaned) !== null
-        const hasSkip = shouldSkipTemperature(cleaned)
-        if (hasNumber || hasSkip) {
-          console.log('[VoiceCloseFlow] Interim: Detected temp/skip, stopping')
-          onStopListening?.()
-          return true
-        }
-      }
-      
-      // Confirmation step: stop as soon as we hear confirm or cancel keywords
-      if (state.step === 'awaiting_confirmation') {
-        const isConfirm = cleaned.includes('confirm') || cleaned.includes('save') ||
-          cleaned.includes('yes') || cleaned.includes('ok')
-        const isCancel = cleaned.includes('cancel') || cleaned.includes('no')
-        if (isConfirm || isCancel) {
-          console.log('[VoiceCloseFlow] Interim: Detected confirm/cancel, stopping')
-          onStopListening?.()
-          return true
-        }
-      }
-      
+
+      // IMPORTANT:
+      // Do not stop early on interim numeric/confirmation guesses.
+      // In Realtime mode this can cut audio before a final transcript event is emitted,
+      // stalling the flow after staff code/temperature.
+      // Let final transcript or post-speech timeout close naturally.
       return false
     },
     [state.step, onStopListening]

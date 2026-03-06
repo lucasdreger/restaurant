@@ -29,7 +29,13 @@ Object.defineProperty(window, 'matchMedia', {
 
 // Mock Supabase to avoid real network calls in unit tests
 vi.mock('@/lib/supabase', () => ({
+    isSupabaseConfigured: vi.fn(() => true),
+    DEMO_SITE_ID: 'b0eebc99-9c0b-4ef8-bb6d-6bb9bd380a12',
     supabase: {
+        auth: {
+            getSession: vi.fn().mockResolvedValue({ data: { session: { access_token: 'test-token' } }, error: null }),
+            signOut: vi.fn().mockResolvedValue({ error: null }),
+        },
         from: vi.fn(() => ({
             select: vi.fn().mockReturnThis(),
             insert: vi.fn().mockReturnThis(),

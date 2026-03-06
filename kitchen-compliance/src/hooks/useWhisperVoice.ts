@@ -21,42 +21,29 @@ export function useWhisperVoice(options: UseWhisperVoiceOptions = {}) {
   const isRecordingRef = useRef(false)
   const autoStopTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
-  const { isListening, setIsListening, settings } = useAppStore()
+  const { isListening, setIsListening, settings, currentSite } = useAppStore()
 
-  // Check if service is configured with API key
+  // Initialize whisper service — no API key needed (uses Edge Function)
   useEffect(() => {
-    if (settings.voiceProvider === 'openai' && settings.openaiApiKey) {
+    if (settings.voiceProvider === 'whisper') {
       whisperService.initialize({
-        apiKey: settings.openaiApiKey,
-        provider: 'openai',
         language: settings.language || 'en',
+        siteId: currentSite?.id,
       })
       setIsConfigured(true)
-      console.log('[WhisperHook] Initialized with OpenAI Whisper')
-    } else if (settings.voiceProvider === 'openrouter' && settings.openrouterApiKey) {
-      whisperService.initialize({
-        apiKey: settings.openrouterApiKey,
-        provider: 'openrouter',
-        model: settings.audioModel,
-        language: settings.language || 'en',
-      })
-      setIsConfigured(true)
-      console.log('[WhisperHook] Initialized with OpenRouter', settings.audioModel)
+      console.log('[WhisperHook] Initialized (Edge Function)')
     } else {
       setIsConfigured(false)
     }
-  }, [settings.voiceProvider, settings.openaiApiKey, settings.openrouterApiKey, settings.audioModel, settings.language])
+  }, [settings.voiceProvider, settings.language, currentSite?.id])
 
   // Start recording
   const startListening = useCallback(async () => {
     console.log('[WhisperHook] startListening called')
     console.log('[WhisperHook] isConfigured:', isConfigured)
-    console.log('[WhisperHook] settings.voiceProvider:', settings.voiceProvider)
-    
+
     if (!isConfigured) {
-      const msg = settings.voiceProvider === 'openrouter'
-        ? 'Please configure an OpenRouter API key in Settings to use voice'
-        : 'Please configure an OpenAI API key in Settings to use voice'
+      const msg = 'Voice provider not configured. Select "Whisper" in Settings.'
       console.error('[WhisperHook] Not configured:', msg)
       setError(msg)
       onError?.(msg)
@@ -87,7 +74,7 @@ export function useWhisperVoice(options: UseWhisperVoiceOptions = {}) {
       // Auto-stop limit after 10 seconds for safety (shorter for quick responses)
       const autoStopDelay = quickResponseMode ? 5000 : 10000
       autoStopTimeoutRef.current = setTimeout(() => {
-        console.log(`[WhisperHook] Auto-stopping recording after ${autoStopDelay/1000}s`)
+        console.log(`[WhisperHook] Auto-stopping recording after ${autoStopDelay / 1000}s`)
         stopListening()
       }, autoStopDelay)
     } catch (err) {
@@ -98,7 +85,7 @@ export function useWhisperVoice(options: UseWhisperVoiceOptions = {}) {
       isRecordingRef.current = false
       setIsListening(false)
     }
-  }, [isConfigured, isListening, setIsListening, onError, settings.voiceProvider, quickResponseMode])
+  }, [isConfigured, isListening, setIsListening, onError, quickResponseMode])
 
   // Stop recording and transcribe
   const stopListening = useCallback(async () => {
@@ -158,7 +145,7 @@ export function useWhisperVoice(options: UseWhisperVoiceOptions = {}) {
   }, [setIsListening])
 
   return {
-    isSupported: true, // Whisper works everywhere with API key
+    isSupported: true, // Whisper works everywhere via Edge Function
     isConfigured,
     isListening,
     isProcessing,

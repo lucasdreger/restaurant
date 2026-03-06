@@ -6,7 +6,7 @@ import { CoolingSensorCard } from '@/components/cooling/CoolingSensorCard'
 import { StartCoolingModal } from '@/components/cooling/StartCoolingModal'
 import { CloseCoolingModal } from '@/components/cooling/CloseCoolingModal'
 import { FridgeTempModal } from '@/components/fridge/FridgeTempModal'
-import { VoiceButton, type VoiceButtonHandle } from '@/components/voice/VoiceButton'
+import { VoiceButton, type VoiceButtonHandle, type VoiceInteractionState } from '@/components/voice/VoiceButton'
 import { useAppStore, getActiveSessions, getOverdueSessions, getUnacknowledgedAlerts, WAKE_WORD_OPTIONS } from '@/store/useAppStore'
 import { useCoolingWorkflow } from '@/services/coolingService'
 import { useTextToSpeech } from '@/hooks/useVoiceRecognition'
@@ -15,7 +15,11 @@ import { useVoiceFridgeFlow } from '@/hooks/useVoiceFridgeFlow'
 import { useWakeWord, playWakeSound, getPrimaryWakeWordLabel } from '@/hooks/useWakeWord'
 import { getFridges, logFridgeTemp } from '@/services/fridgeService'
 import { parseVoiceCommand } from '@/lib/voiceCommands'
-import type { FoodItemPreset, VoiceCommand, CloseCoolingData } from '@/types'
+import { cn } from '@/lib/utils'
+import { isLike } from '@/lib/stringUtils'
+import { useCoolingSessions } from '@/hooks/queries/useCooling'
+import { useStaff } from '@/hooks/queries/useStaff'
+import type { FoodItemPreset, VoiceCommand, CloseCoolingData, CoolingSession } from '@/types'
 import { toast } from 'sonner'
 
 interface DashboardProps {
@@ -33,9 +37,19 @@ export function Dashboard({ onNavigate, currentScreen = 'home' }: DashboardProps
 
   const [fridges, setFridges] = useState<any[]>([])
 
-  const [wakeWordTriggered, setWakeWordTriggered] = useState(false)
+  const [wakeWordTriggerToken, setWakeWordTriggerToken] = useState(0)
+  const [isFlowTransitioning, setIsFlowTransitioning] = useState(false)
+  const [isWakeWordSuppressed, setIsWakeWordSuppressed] = useState(false)
+  const [voiceInteraction, setVoiceInteraction] = useState<{ state: VoiceInteractionState; detail?: string }>({
+    state: 'idle',
+  })
 
-  const { coolingSessions, currentSite, alerts, acknowledgeAlert, staffMembers, settings } = useAppStore()
+  const { currentSite, alerts, acknowledgeAlert, settings } = useAppStore()
+
+  // React Query Hooks
+  const { data: coolingSessions = [] } = useCoolingSessions(currentSite?.id)
+  const { data: staffMembers = [] } = useStaff(currentSite?.id)
+
   const {
     startCooling,
     closeCooling,
@@ -45,6 +59,29 @@ export function Dashboard({ onNavigate, currentScreen = 'home' }: DashboardProps
   const { speak } = useTextToSpeech()
 
   const voiceButtonRef = useRef<VoiceButtonHandle>(null)
+  const requestFlowInput = useCallback(() => {
+    // Ensure prompt audio is never captured as user input.
+    voiceButtonRef.current?.stopVoice()
+
+    const delayMs = 120
+    setTimeout(() => {
+      console.log('[Dashboard] Flow requesting input - triggering mic')
+      voiceButtonRef.current?.triggerVoice()
+    }, delayMs)
+  }, [])
+
+  const speakForFlow = useCallback(
+    (
+      text: string,
+      options?: { rate?: number; pitch?: number; onComplete?: () => void; preferBrowser?: boolean }
+    ) => {
+      // Use deterministic TTS for flow prompts.
+      // Realtime synthesized responses can be inaudible in some autoplay/mic states.
+      voiceButtonRef.current?.stopVoice()
+      speak(text, { ...options, preferBrowser: true })
+    },
+    [speak]
+  )
 
   // Session data
   const activeSessions = useMemo(() => getActiveSessions(coolingSessions), [coolingSessions])
@@ -114,17 +151,8 @@ export function Dashboard({ onNavigate, currentScreen = 'home' }: DashboardProps
     },
     onOpenModal: (sessionId) => setCloseModalSessionId(sessionId),
     onCloseModal: () => setCloseModalSessionId(null),
-    speak,
-    onAwaitingInput: () => {
-      // Minimal delay to ensure React has re-rendered with conversationMode=true
-      // Reduced from 300ms to 100ms for faster response
-      setTimeout(() => {
-        console.log('[Dashboard] Flow requesting input - triggering mic')
-        if (voiceButtonRef.current) {
-          voiceButtonRef.current.triggerVoice()
-        }
-      }, 100)
-    },
+    speak: speakForFlow,
+    onAwaitingInput: requestFlowInput,
     onStopListening: commonOnStopListening
   })
 
@@ -154,14 +182,8 @@ export function Dashboard({ onNavigate, currentScreen = 'home' }: DashboardProps
       setIsFridgeTempModalOpen(true)
     },
     onCloseModal: () => setIsFridgeTempModalOpen(false),
-    speak,
-    onAwaitingInput: () => {
-      setTimeout(() => {
-        if (voiceButtonRef.current) {
-          voiceButtonRef.current.triggerVoice()
-        }
-      }, 100)
-    },
+    speak: speakForFlow,
+    onAwaitingInput: requestFlowInput,
     onStopListening: commonOnStopListening
   })
 
@@ -172,6 +194,45 @@ export function Dashboard({ onNavigate, currentScreen = 'home' }: DashboardProps
   }, [voiceFridgeFlow.temperature, voiceFridgeFlow.staffId])
 
   const resumeListeningRef = useRef<() => void>(() => { })
+  const flowTransitionTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const wakeWordSuppressTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+
+  const suppressWakeWordTemporarily = useCallback((durationMs = 3500) => {
+    setIsWakeWordSuppressed(true)
+    if (wakeWordSuppressTimeoutRef.current) {
+      clearTimeout(wakeWordSuppressTimeoutRef.current)
+    }
+    wakeWordSuppressTimeoutRef.current = setTimeout(() => {
+      setIsWakeWordSuppressed(false)
+      wakeWordSuppressTimeoutRef.current = null
+    }, durationMs)
+  }, [])
+
+  const beginFlowTransition = useCallback(() => {
+    // Protect against race: command mode ends before flow state flips to awaiting_*.
+    setIsFlowTransitioning(true)
+
+    if (flowTransitionTimeoutRef.current) {
+      clearTimeout(flowTransitionTimeoutRef.current)
+    }
+
+    flowTransitionTimeoutRef.current = setTimeout(() => {
+      setIsFlowTransitioning(false)
+      flowTransitionTimeoutRef.current = null
+    }, 1500)
+  }, [])
+
+  // Cleanup transition timer on unmount
+  useEffect(() => {
+    return () => {
+      if (flowTransitionTimeoutRef.current) {
+        clearTimeout(flowTransitionTimeoutRef.current)
+      }
+      if (wakeWordSuppressTimeoutRef.current) {
+        clearTimeout(wakeWordSuppressTimeoutRef.current)
+      }
+    }
+  }, [])
 
 
   const handleDiscardCooling = useCallback(async (sessionId: string) => {
@@ -184,6 +245,66 @@ export function Dashboard({ onNavigate, currentScreen = 'home' }: DashboardProps
 
   // Ref to prevent double execution (Immediate vs Whisper)
   const lastCommandHandledAt = useRef<number>(0)
+  const isFlowInProgress = voiceCloseFlow.step !== 'idle' || voiceFridgeFlow.step !== 'idle'
+  const isFlowActive = isFlowTransitioning || isFlowInProgress
+  const isVoiceInteractionBusy = useMemo(
+    () =>
+      voiceInteraction.state === 'connecting' ||
+      voiceInteraction.state === 'listening' ||
+      voiceInteraction.state === 'processing' ||
+      voiceInteraction.state === 'speaking' ||
+      voiceInteraction.state === 'flow_active',
+    [voiceInteraction.state]
+  )
+  const previousFlowInProgressRef = useRef(isFlowInProgress)
+  const wakeWordResumeTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+
+  // Once flow is truly active, transition guard is no longer needed.
+  useEffect(() => {
+    if (isFlowInProgress) {
+      setIsFlowTransitioning(false)
+      if (flowTransitionTimeoutRef.current) {
+        clearTimeout(flowTransitionTimeoutRef.current)
+        flowTransitionTimeoutRef.current = null
+      }
+    }
+  }, [isFlowInProgress])
+
+  useEffect(() => {
+    const wasFlowInProgress = previousFlowInProgressRef.current
+    if (wasFlowInProgress && !isFlowInProgress) {
+      if (settings.voiceProvider === 'realtime') {
+        voiceButtonRef.current?.stopVoice()
+      }
+
+      if (settings.wakeWordEnabled) {
+        if (wakeWordResumeTimeoutRef.current) {
+          clearTimeout(wakeWordResumeTimeoutRef.current)
+        }
+
+        wakeWordResumeTimeoutRef.current = setTimeout(() => {
+          if (isFlowActive || isVoiceInteractionBusy) return
+          console.log('[Dashboard] Flow completed, resuming wake word...')
+          resumeListeningRef.current()
+        }, 650)
+      }
+    }
+    previousFlowInProgressRef.current = isFlowInProgress
+  }, [
+    isFlowActive,
+    isFlowInProgress,
+    isVoiceInteractionBusy,
+    settings.voiceProvider,
+    settings.wakeWordEnabled,
+  ])
+
+  useEffect(() => {
+    return () => {
+      if (wakeWordResumeTimeoutRef.current) {
+        clearTimeout(wakeWordResumeTimeoutRef.current)
+      }
+    }
+  }, [])
 
   const handleVoiceCommand = useCallback(
     (command: VoiceCommand) => {
@@ -195,7 +316,6 @@ export function Dashboard({ onNavigate, currentScreen = 'home' }: DashboardProps
       lastCommandHandledAt.current = Date.now()
 
       console.log('[Dashboard] Handling voice command:', command)
-      setWakeWordTriggered(false)
 
       switch (command.type) {
         case 'start_cooling':
@@ -204,23 +324,26 @@ export function Dashboard({ onNavigate, currentScreen = 'home' }: DashboardProps
           } else {
             setIsStartModalOpen(true)
           }
+          suppressWakeWordTemporarily()
           break
         case 'stop_cooling':
+          beginFlowTransition()
           voiceCloseFlow.startFlow(command.item)
           break
         case 'discard':
           if (activeSessions.length > 0) {
             handleDiscardCooling(activeSessions[0].id)
           }
+          suppressWakeWordTemporarily()
           break
         case 'log_fridge_temp':
+          beginFlowTransition()
           voiceFridgeFlow.startFlow(command.fridgeNumber)
           break
       }
 
       // Resume wake word listening after a short delay (only if not starting a flow)
-      const isFlowActive = voiceCloseFlow.step !== 'idle' || voiceFridgeFlow.step !== 'idle'
-      if (settings.wakeWordEnabled && command.type !== 'stop_cooling' && command.type !== 'log_fridge_temp' && !isFlowActive) {
+      if (settings.wakeWordEnabled && command.type !== 'stop_cooling' && command.type !== 'log_fridge_temp' && !isFlowActive && !isVoiceInteractionBusy) {
         console.log('[Dashboard] Will resume wake word in 1s...')
         setTimeout(() => {
           console.log('[Dashboard] Resuming wake word...')
@@ -228,7 +351,70 @@ export function Dashboard({ onNavigate, currentScreen = 'home' }: DashboardProps
         }, 1000)
       }
     },
-    [activeSessions, handleStartCooling, handleDiscardCooling, settings.wakeWordEnabled, voiceCloseFlow, voiceFridgeFlow, speak]
+    [activeSessions, handleStartCooling, handleDiscardCooling, settings.wakeWordEnabled, voiceCloseFlow, voiceFridgeFlow, isFlowActive, isVoiceInteractionBusy, beginFlowTransition, suppressWakeWordTemporarily]
+  )
+
+  const inferStopItemFromNoisySpeech = useCallback(
+    (rawTranscript: string): string | null => {
+      if (activeSessions.length === 0) return null
+
+      const normalized = rawTranscript
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^\w\s.-]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+
+      if (!normalized) return null
+
+      const tokens = normalized.split(/\s+/).filter(Boolean)
+      const startHints = ['start', 'begin', 'new']
+      if (startHints.some((hint) => normalized.includes(hint))) return null
+
+      const stopHints = ['finish', 'done', 'stop', 'close', 'pull', 'pulling', 'fridge', 'move', 'cooling', 'coolin', 'kulin', 'comi', 'finis']
+      const hasStopHint = stopHints.some((hint) => normalized.includes(hint)) ||
+        tokens.some((token) => stopHints.some((hint) => isLike(token, hint, 2)))
+
+      let bestMatch: { item: string; score: number } | null = null
+
+      for (const session of activeSessions) {
+        const itemNormalized = session.item_name
+          .toLowerCase()
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '')
+          .replace(/[^\w\s.-]/g, ' ')
+          .replace(/\s+/g, ' ')
+          .trim()
+
+        if (!itemNormalized) continue
+
+        const itemTokens = itemNormalized.split(/\s+/).filter(Boolean)
+        let score = 0
+
+        if (normalized.includes(itemNormalized)) score += 4
+        if (isLike(normalized, itemNormalized, 3)) score += 2
+
+        for (const token of tokens) {
+          for (const itemToken of itemTokens) {
+            if (token === itemToken) {
+              score += 2
+            } else if (isLike(token, itemToken, 1)) {
+              score += 1
+            }
+          }
+        }
+
+        if (!bestMatch || score > bestMatch.score) {
+          bestMatch = { item: session.item_name, score }
+        }
+      }
+
+      if (!bestMatch) return null
+      const threshold = hasStopHint ? 2 : 3
+      return bestMatch.score >= threshold ? bestMatch.item : null
+    },
+    [activeSessions]
   )
 
   const handleVoiceTranscript = useCallback((transcript: string) => {
@@ -237,8 +423,17 @@ export function Dashboard({ onNavigate, currentScreen = 'home' }: DashboardProps
       voiceCloseFlow.handleTranscript(transcript)
     } else if (voiceFridgeFlow.step !== 'idle') {
       voiceFridgeFlow.handleTranscript(transcript)
+    } else {
+      const parsedCommand = parseVoiceCommand(transcript)
+      if (parsedCommand.type === 'noise' || parsedCommand.type === 'unknown') {
+        const inferredItem = inferStopItemFromNoisySpeech(transcript)
+        if (inferredItem) {
+          console.log('[Dashboard] Inferred noisy transcript as stop_cooling:', inferredItem)
+          handleVoiceCommand({ type: 'stop_cooling', item: inferredItem })
+        }
+      }
     }
-  }, [voiceCloseFlow, voiceFridgeFlow])
+  }, [voiceCloseFlow, voiceFridgeFlow, inferStopItemFromNoisySpeech, handleVoiceCommand])
 
   const handleVoiceInterimTranscript = useCallback((transcript: string) => {
     if (voiceCloseFlow.step !== 'idle') {
@@ -249,32 +444,49 @@ export function Dashboard({ onNavigate, currentScreen = 'home' }: DashboardProps
   }, [voiceCloseFlow, voiceFridgeFlow])
 
   const handleVoiceEnd = useCallback(() => {
-    setWakeWordTriggered(false)
-
     // ONLY resume wake word if we are NOT in the middle of a voice flow
-    const isFlowActive = voiceCloseFlow.step !== 'idle' || voiceFridgeFlow.step !== 'idle'
-    if (settings.wakeWordEnabled && !isFlowActive) {
+    if (settings.wakeWordEnabled && !isFlowActive && !isVoiceInteractionBusy) {
       console.log('[Dashboard] Voice ended, resuming wake word...')
       resumeListeningRef.current()
     } else {
       console.log('[Dashboard] Voice ended, but flow active - skipping wake word resume')
     }
-  }, [settings.wakeWordEnabled, voiceCloseFlow.step, voiceFridgeFlow.step])
+  }, [settings.wakeWordEnabled, isFlowActive, isVoiceInteractionBusy])
+
+  const handleVoiceInteractionStateChange = useCallback((state: VoiceInteractionState, detail?: string) => {
+    setVoiceInteraction((current) => {
+      if (current.state === state && current.detail === detail) return current
+      return { state, detail }
+    })
+  }, [])
 
   const handleWakeWordHeard = useCallback(() => {
+    if (isVoiceInteractionBusy) return
     console.log('[Dashboard] Wake word heard (interim) - Optimistic Trigger!')
     playWakeSound()
+    // In realtime mode, wait for final wake-word detection before opening mic.
+    // This avoids racing browser wake-word ASR with the realtime session start.
+    if (settings.voiceProvider === 'realtime') return
+
     // Delay triggering recording slightly to let sound finish (avoids capturing beep)
     setTimeout(() => {
-      setWakeWordTriggered(true)
+      setWakeWordTriggerToken((token) => token + 1)
     }, 400)
-  }, [])
+  }, [isVoiceInteractionBusy, settings.voiceProvider])
 
   const handleWakeWordDetected = useCallback(() => {
+    if (isVoiceInteractionBusy) return
     console.log('[Dashboard] Wake word fully detected (final)')
-    // Already handled by optimistic trigger, but good for validation
-    // setWakeWordTriggered(true) 
-  }, [])
+    if (Date.now() - lastCommandHandledAt.current < 1500) {
+      console.log('[Dashboard] Skipping wake-word mic trigger because immediate command already handled')
+      return
+    }
+
+    // Realtime mode starts capture on final wake-word detection.
+    if (settings.voiceProvider === 'realtime') {
+      setWakeWordTriggerToken((token) => token + 1)
+    }
+  }, [isVoiceInteractionBusy, settings.voiceProvider])
 
   const handleImmediateCommand = useCallback((command: string) => {
     console.log('[Dashboard] Immediate command after wake word:', command)
@@ -296,28 +508,65 @@ export function Dashboard({ onNavigate, currentScreen = 'home' }: DashboardProps
     console.log('[Dashboard] Parsed command:', parsedCommand)
 
     if (parsedCommand.type === 'noise') {
-      console.log('[Dashboard] Ignored noise/short command')
+      const normalized = command
+        .toLowerCase()
+        .replace(/[^\w\s.-]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+
+      // Wake-word ASR often turns "finish cooling pasta" into "is cooling pasta".
+      // In immediate-command context, infer stop_cooling when we have "cooling <item>".
+      const coolingTail = normalized.match(/\bcooling\s+(.+)$/i)
+      const looksLikeStart = /\b(start|begin|new)\b/i.test(normalized)
+      if (coolingTail && !looksLikeStart) {
+        const inferredItem = coolingTail[1]?.trim()
+        if (inferredItem) {
+          console.log('[Dashboard] Inferred noisy immediate command as stop_cooling:', inferredItem)
+          handleVoiceCommand({ type: 'stop_cooling', item: inferredItem })
+          return
+        }
+      }
+
+      const inferredSessionItem = inferStopItemFromNoisySpeech(command)
+      if (inferredSessionItem) {
+        console.log('[Dashboard] Inferred session item from noisy immediate command:', inferredSessionItem)
+        handleVoiceCommand({ type: 'stop_cooling', item: inferredSessionItem })
+        return
+      }
+
+      console.log('[Dashboard] Immediate command too noisy/incomplete, falling back to command capture')
+      if (voiceButtonRef.current) {
+        voiceButtonRef.current.triggerVoice()
+      }
       return
     }
 
     if (parsedCommand.type !== 'unknown') {
       console.log('[Dashboard] Executing command:', parsedCommand)
-      // Signal that we handled this, so subsequent Whisper result is ignored
-      lastCommandHandledAt.current = Date.now()
       handleVoiceCommand(parsedCommand)
     } else {
+      const inferredSessionItem = inferStopItemFromNoisySpeech(command)
+      if (inferredSessionItem) {
+        console.log('[Dashboard] Inferred session item from unknown immediate command:', inferredSessionItem)
+        handleVoiceCommand({ type: 'stop_cooling', item: inferredSessionItem })
+        return
+      }
+
       console.log('[Dashboard] Unknown command, will wait for VoiceButton')
-      speak("Sorry, I didn't understand that. Please try again.")
+      if (voiceButtonRef.current) {
+        voiceButtonRef.current.triggerVoice()
+      }
 
       // Resume wake word even for unknown commands
       if (settings.wakeWordEnabled) {
         setTimeout(() => {
+          if (isVoiceInteractionBusy || isFlowActive) return
           console.log('[Dashboard] Resuming wake word after unknown command...')
           resumeListeningRef.current()
         }, 2000) // Give user time to hear the feedback
       }
     }
-  }, [handleVoiceCommand, speak, settings.wakeWordEnabled, voiceCloseFlow, voiceFridgeFlow])
+  }, [handleVoiceCommand, inferStopItemFromNoisySpeech, isFlowActive, isVoiceInteractionBusy, settings.wakeWordEnabled, voiceCloseFlow, voiceFridgeFlow])
 
   const activeWakeWordPhrases = useMemo(() => {
     const activeIds = settings.activeWakeWords || ['luma']
@@ -334,8 +583,13 @@ export function Dashboard({ onNavigate, currentScreen = 'home' }: DashboardProps
   const { isActive: isWakeWordActive, resumeListening } = useWakeWord({
     onWakeWordHeard: handleWakeWordHeard,
     onWakeWordDetected: handleWakeWordDetected,
+    // Keep immediate command detection enabled for all providers.
+    // This is required for one-breath commands like:
+    // "Luma finish cooling pasta" / "Luma start cooling pasta".
     onCommandDetected: handleImmediateCommand,
-    enabled: settings.wakeWordEnabled,
+    // Suspend wake-word while the interview flow is active, otherwise SpeechRecognition instances
+    // will fight each other and abort staff-code/temp capture.
+    enabled: settings.wakeWordEnabled && !isFlowActive && !isVoiceInteractionBusy && !isWakeWordSuppressed,
     language: settings.language === 'en' ? 'en-IE' : settings.language,
     wakeWords: activeWakeWordPhrases,
   })
@@ -366,6 +620,46 @@ export function Dashboard({ onNavigate, currentScreen = 'home' }: DashboardProps
       }, index * 500) // Stagger toasts
     })
   }, [unacknowledgedAlerts, acknowledgeAlert])
+
+  const voiceStatusTone = useMemo(() => {
+    switch (voiceInteraction.state) {
+      case 'error':
+        return 'text-amber-500'
+      case 'wake_ready':
+        return 'text-rose-500'
+      case 'connecting':
+      case 'processing':
+        return 'text-purple-500'
+      case 'listening':
+      case 'flow_active':
+        return 'text-green-500'
+      case 'speaking':
+        return 'text-amber-500'
+      default:
+        return 'text-theme-muted'
+    }
+  }, [voiceInteraction.state])
+
+  const voiceStatusSummary = useMemo(() => {
+    switch (voiceInteraction.state) {
+      case 'wake_ready':
+        return `Wake word: "${primaryWakeWordLabel}"`
+      case 'connecting':
+        return 'Connecting realtime voice'
+      case 'processing':
+        return 'Processing speech'
+      case 'listening':
+        return 'Listening for command'
+      case 'flow_active':
+        return 'Flow active'
+      case 'speaking':
+        return 'Assistant speaking'
+      case 'error':
+        return 'Voice error'
+      default:
+        return 'Voice ready'
+    }
+  }, [primaryWakeWordLabel, voiceInteraction.state])
 
   return (
     <div className="min-h-screen bg-theme-primary flex">
@@ -424,16 +718,18 @@ export function Dashboard({ onNavigate, currentScreen = 'home' }: DashboardProps
                   onTranscript={handleVoiceTranscript}
                   onInterimTranscript={handleVoiceInterimTranscript}
                   onEnd={handleVoiceEnd}
+                  onInteractionStateChange={handleVoiceInteractionStateChange}
                   size="sm"
                   wakeWordActive={isWakeWordActive}
-                  wakeWordTriggered={wakeWordTriggered}
+                  wakeWordTriggerToken={wakeWordTriggerToken}
                   wakeWordLabel={primaryWakeWordLabel}
                   conversationMode={voiceCloseFlow.step !== 'idle' || voiceFridgeFlow.step !== 'idle'}
                   quickResponseMode={voiceCloseFlow.isQuickResponseStep || voiceFridgeFlow.isQuickResponseStep}
                 />
                 <div className="text-left">
                   <span className="font-semibold text-theme-primary">Voice Commands</span>
-                  <p className="text-xs text-theme-muted">Say "Start cooling" or "Finish cooling 1"</p>
+                  <p className={cn('text-xs font-medium', voiceStatusTone)}>{voiceStatusSummary}</p>
+                  <p className="text-xs text-theme-muted">{voiceInteraction.detail || 'Say "Start cooling" or "Finish cooling 1"'}</p>
                 </div>
               </div>
             </div>
@@ -456,7 +752,7 @@ export function Dashboard({ onNavigate, currentScreen = 'home' }: DashboardProps
                   coolingSessions.length === 0
                     ? 0
                     : Math.round(
-                      (coolingSessions.filter(s => s.status === 'closed').length /
+                      (coolingSessions.filter((s: CoolingSession) => s.status === 'closed').length /
                         coolingSessions.length) *
                       100
                     )
@@ -464,7 +760,7 @@ export function Dashboard({ onNavigate, currentScreen = 'home' }: DashboardProps
                 status={
                   coolingSessions.length === 0
                     ? 'pending'
-                    : coolingSessions.every(s => s.status === 'closed')
+                    : coolingSessions.every((s: CoolingSession) => s.status === 'closed')
                       ? 'complete'
                       : 'in-progress'
                 }

@@ -341,7 +341,7 @@ export type Database = {
           name: string
           role: 'manager' | 'chef' | 'staff'
           initials: string | null
-          pin: string | null
+          pin_hash: string | null
           staff_code: string | null
           active: boolean | null
           email: string | null
@@ -354,7 +354,7 @@ export type Database = {
           name: string
           role?: 'manager' | 'chef' | 'staff'
           initials?: string | null
-          pin?: string | null
+          pin_hash?: string | null
           staff_code?: string | null
           active?: boolean | null
           email?: string | null
@@ -367,7 +367,7 @@ export type Database = {
           name?: string
           role?: 'manager' | 'chef' | 'staff'
           initials?: string | null
-          pin?: string | null
+          pin_hash?: string | null
           staff_code?: string | null
           active?: boolean | null
           email?: string | null
@@ -406,34 +406,34 @@ export type Database = {
       }
       compliance_logs: {
         Row: {
-            id: string
-            site_id: string | null
-            schema_id: string
-            data: Json
-            status: 'pass' | 'fail' | 'rectified' | 'pending' | null
-            source: 'app' | 'voice' | 'iot_sensor' | 'manager_audit' | null
-            created_at: string | null
-            user_id: string | null
+          id: string
+          site_id: string | null
+          schema_id: string
+          data: Json
+          status: 'pass' | 'fail' | 'rectified' | 'pending' | null
+          source: 'app' | 'voice' | 'iot_sensor' | 'manager_audit' | null
+          created_at: string | null
+          user_id: string | null
         }
         Insert: {
-            id?: string
-            site_id?: string | null
-            schema_id: string
-            data: Json
-            status?: 'pass' | 'fail' | 'rectified' | 'pending' | null
-            source?: 'app' | 'voice' | 'iot_sensor' | 'manager_audit' | null
-            created_at?: string | null
-            user_id?: string | null
+          id?: string
+          site_id?: string | null
+          schema_id: string
+          data: Json
+          status?: 'pass' | 'fail' | 'rectified' | 'pending' | null
+          source?: 'app' | 'voice' | 'iot_sensor' | 'manager_audit' | null
+          created_at?: string | null
+          user_id?: string | null
         }
         Update: {
-            id?: string
-            site_id?: string | null
-            schema_id?: string
-            data?: Json
-            status?: 'pass' | 'fail' | 'rectified' | 'pending' | null
-            source?: 'app' | 'voice' | 'iot_sensor' | 'manager_audit' | null
-            created_at?: string | null
-            user_id?: string | null
+          id?: string
+          site_id?: string | null
+          schema_id?: string
+          data?: Json
+          status?: 'pass' | 'fail' | 'rectified' | 'pending' | null
+          source?: 'app' | 'voice' | 'iot_sensor' | 'manager_audit' | null
+          created_at?: string | null
+          user_id?: string | null
         }
       }
       goods_receipts: {

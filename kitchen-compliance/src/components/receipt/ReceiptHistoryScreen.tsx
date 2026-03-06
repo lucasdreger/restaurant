@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import {
   ListFilter,
   Package,
@@ -89,7 +89,7 @@ interface ReceiptCardProps {
 
 function ReceiptCard({ receipt, onClick }: ReceiptCardProps) {
   const status = STATUS_MAP[receipt.status as ReceiptStatus] || STATUS_MAP.completed
-  
+
   const createdAtDate = useMemo(() => {
     return new Date(receipt.createdAt).toLocaleString('en-IE', { dateStyle: 'short', timeStyle: 'short' })
   }, [receipt.createdAt])
@@ -190,7 +190,7 @@ function ImageGrid({ images }: ImageGridProps) {
                   {ImageTypeLabel[selectedImage.imageType]}
                 </DialogTitle>
                 <div className="text-sm text-theme-muted">
-                    Saved on: {new Date(selectedImage.createdAt).toLocaleString('en-IE', { dateStyle: 'medium', timeStyle: 'short' })}
+                  Saved on: {new Date(selectedImage.createdAt).toLocaleString('en-IE', { dateStyle: 'medium', timeStyle: 'short' })}
                 </div>
               </DialogHeader>
               <ScrollArea className="flex-1 p-4">
@@ -222,7 +222,7 @@ function ImageGrid({ images }: ImageGridProps) {
               </ScrollArea>
               <div className="p-4 border-t border-theme-border flex justify-end">
                 <Button variant="outline" onClick={() => setSelectedImage(null)}>
-                    Close
+                  Close
                 </Button>
               </div>
             </>
@@ -241,7 +241,7 @@ interface ReceiptDetailModalProps {
 function ReceiptDetailModal({ receipt, onClose }: ReceiptDetailModalProps) {
   const [images, setImages] = useState<DeliveryImage[]>([])
   const { currentSite } = useAppStore()
-  
+
   const { data: details, isLoading: isLoadingDetails } = useQuery({
     queryKey: ['receiptDetails', receipt?.id],
     queryFn: () => {
@@ -252,7 +252,7 @@ function ReceiptDetailModal({ receipt, onClose }: ReceiptDetailModalProps) {
   })
 
   // Update images when details load
-  useMemo(() => {
+  useEffect(() => {
     if (details?.images) {
       setImages(details.images)
     }
@@ -264,7 +264,7 @@ function ReceiptDetailModal({ receipt, onClose }: ReceiptDetailModalProps) {
 
   const handleDownloadSinglePdf = async () => {
     if (!details) return
-    
+
     try {
       toast.loading('Generating receipt PDF...')
       const blob = await generateGoodsReceiptReport(
@@ -302,7 +302,7 @@ function ReceiptDetailModal({ receipt, onClose }: ReceiptDetailModalProps) {
               Received by: {receipt.receivedByName}
             </span>
             <Badge className={cn('w-fit font-medium border', STATUS_MAP[receipt.status as ReceiptStatus].color)}>
-                {STATUS_MAP[receipt.status as ReceiptStatus].label}
+              {STATUS_MAP[receipt.status as ReceiptStatus].label}
             </Badge>
           </div>
         </DialogHeader>
@@ -323,7 +323,7 @@ function ReceiptDetailModal({ receipt, onClose }: ReceiptDetailModalProps) {
                 <p className="text-sm whitespace-pre-wrap text-theme-primary"><strong>Notes:</strong> {receipt.notes || 'N/A'}</p>
                 <p className="text-xs text-theme-muted mt-4">Auditable fields (ID, Created on, Received by) are immutable after status 'completed'.</p>
               </div>
-              
+
               <ImageGrid images={images} />
             </div>
 
@@ -344,10 +344,10 @@ function ReceiptDetailModal({ receipt, onClose }: ReceiptDetailModalProps) {
                           {(item as any).quantity} {(item as any).unit} | Temp: {(item as any).temperature?.toFixed(1) ?? '--'}°C
                         </p>
                         <Badge className={cn(
-                            'mt-1 w-fit',
-                            (item as any).temperature_compliant ? STATUS_MAP.completed.color : STATUS_MAP.flagged.color
+                          'mt-1 w-fit',
+                          (item as any).temperature_compliant ? STATUS_MAP.completed.color : STATUS_MAP.flagged.color
                         )}>
-                            {(item as any).temperature_compliant ? 'Temp. OK' : 'Temp. Issue'}
+                          {(item as any).temperature_compliant ? 'Temp. OK' : 'Temp. Issue'}
                         </Badge>
                       </div>
                       <div className="text-sm text-right">
@@ -406,12 +406,12 @@ function ReportDialog({ isOpen, onClose, receipts, filters }: ReportDialogProps)
     }
 
     setIsGenerating(true)
-            toast.loading('Generating PDF report...')
+    toast.loading('Generating PDF report...')
 
     try {
       // Fetch full details for all receipts if generating detailed report
       let receiptsWithDetails = receipts
-      
+
       if (reportType === 'detailed') {
         const detailsPromises = receipts.map(r => getGoodsReceiptWithDetails(r.id))
         const details = await Promise.all(detailsPromises)
@@ -468,7 +468,7 @@ function ReportDialog({ isOpen, onClose, receipts, filters }: ReportDialogProps)
             Generate PDF Report
           </DialogTitle>
         </DialogHeader>
-        
+
         <div className="space-y-6 py-4">
           {/* Report Type Selection */}
           <div className="space-y-3">
@@ -489,7 +489,7 @@ function ReportDialog({ isOpen, onClose, receipts, filters }: ReportDialogProps)
                   All details, items and images from each receipt
                 </p>
               </button>
-              
+
               <button
                 onClick={() => setReportType('summary')}
                 className={cn(
@@ -623,10 +623,10 @@ export function ReceiptHistoryScreen({ onBack, onNavigate }: ReceiptHistoryScree
 
   const filteredReceipts = useMemo(() => {
     if (!filters.search) return receipts
-    
+
     const searchLower = filters.search.toLowerCase()
-    
-    return receipts.filter(receipt => 
+
+    return receipts.filter(receipt =>
       receipt.supplierName.toLowerCase().includes(searchLower) ||
       receipt.invoiceNumber?.toLowerCase().includes(searchLower) ||
       receipt.receivedByName.toLowerCase().includes(searchLower)
@@ -682,7 +682,7 @@ export function ReceiptHistoryScreen({ onBack, onNavigate }: ReceiptHistoryScree
           </h2>
 
           <div className="flex-1 min-w-[200px] relative">
-            <Input 
+            <Input
               placeholder="Search Supplier, Invoice, or Receiver..."
               value={filters.search}
               onChange={(e) => handleFilterChange('search', e.target.value)}
@@ -692,8 +692,8 @@ export function ReceiptHistoryScreen({ onBack, onNavigate }: ReceiptHistoryScree
           </div>
 
           <div className="w-[180px]">
-            <Select 
-              value={filters.status} 
+            <Select
+              value={filters.status}
               onValueChange={(value: string) => handleFilterChange('status', value)}
             >
               <SelectTrigger>
@@ -709,8 +709,8 @@ export function ReceiptHistoryScreen({ onBack, onNavigate }: ReceiptHistoryScree
               </SelectContent>
             </Select>
           </div>
-          
-          <Button 
+
+          <Button
             variant="outline"
             onClick={() => setFilters(DEFAULT_FILTERS)}
           >
@@ -770,9 +770,9 @@ export function ReceiptHistoryScreen({ onBack, onNavigate }: ReceiptHistoryScree
       )}
 
       <ReceiptDetailModal receipt={selectedReceipt} onClose={closeModal} />
-      
-      <ReportDialog 
-        isOpen={isReportDialogOpen} 
+
+      <ReportDialog
+        isOpen={isReportDialogOpen}
         onClose={() => setIsReportDialogOpen(false)}
         receipts={filteredReceipts}
         filters={filters}

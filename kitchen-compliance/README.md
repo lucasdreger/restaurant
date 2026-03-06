@@ -75,6 +75,9 @@ Create a `.env` file:
 ```env
 VITE_SUPABASE_URL=your-supabase-url
 VITE_SUPABASE_ANON_KEY=your-anon-key
+# Optional: explicit demo login (recommended for shared demo environments)
+VITE_DEMO_USER_EMAIL=demo@your-domain.com
+VITE_DEMO_USER_PASSWORD=your-strong-demo-password
 ```
 
 Without Supabase configured, the app works fully offline with localStorage.
@@ -207,6 +210,9 @@ kitchen-compliance/
 # Supabase (optional)
 VITE_SUPABASE_URL=https://xxx.supabase.co
 VITE_SUPABASE_ANON_KEY=eyJxxx...
+# Optional explicit demo credentials (no hardcoded fallback in client)
+VITE_DEMO_USER_EMAIL=demo@your-domain.com
+VITE_DEMO_USER_PASSWORD=your-strong-demo-password
 
 # Voice (future)
 VITE_USE_WHISPER=false

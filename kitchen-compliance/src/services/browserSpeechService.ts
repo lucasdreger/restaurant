@@ -147,6 +147,10 @@ export class BrowserSpeechService {
       
       let errorMessage = 'Speech recognition error'
       switch (event.error) {
+        case 'aborted':
+          // Common when we intentionally stop early (e.g. after detecting a short answer).
+          // Treat as normal lifecycle, not an error to surface.
+          return
         case 'no-speech':
           errorMessage = 'No speech detected'
           break

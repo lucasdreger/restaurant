@@ -1,5 +1,6 @@
 import { Wifi, WifiOff, Clock, AlertTriangle, CheckCircle, Settings } from 'lucide-react'
 import { useAppStore, getActiveSessions, getOverdueSessions } from '@/store/useAppStore'
+import { useCoolingSessions } from '@/hooks/queries/useCooling'
 import { cn } from '@/lib/utils'
 import { useEffect, useState, useMemo } from 'react'
 
@@ -8,7 +9,8 @@ interface StatusHeaderProps {
 }
 
 export function StatusHeader({ onSettingsClick }: StatusHeaderProps) {
-  const { isOnline, currentSite, coolingSessions, settings } = useAppStore()
+  const { isOnline, currentSite, settings } = useAppStore()
+  const { data: coolingSessions = [] } = useCoolingSessions(currentSite?.id)
   const [currentTime, setCurrentTime] = useState(new Date())
 
   // Use memoized selectors

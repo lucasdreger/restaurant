@@ -42,8 +42,9 @@
    ======================================== */
 .theme-day {
   /* Backgrounds */
-  --bg-primary: 0 0% 98%;
-  --bg-secondary: 210 20% 96%;
+  --bg-primary: 210 20% 96%;
+  /* Slightly darker cool grey for contrast against white cards */
+  --bg-secondary: 210 20% 94%;
   --bg-card: 0 0% 100%;
   --bg-elevated: 0 0% 100%;
   --bg-input: 210 20% 98%;
@@ -52,15 +53,17 @@
 
   /* Text */
   --text-primary: 220 13% 13%;
-  --text-secondary: 220 9% 46%;
-  --text-muted: 220 9% 62%;
+  --text-secondary: 220 13% 40%;
+  /* Darker for better readability */
+  --text-muted: 220 13% 60%;
   --text-inverted: 0 0% 100%;
 
   /* Borders */
-  --border-primary: 220 13% 91%;
-  --border-secondary: 220 13% 95%;
-  --border-glass: 220 13% 91% / 0.6;
-  --input-border: 220 13% 86%;
+  --border-primary: 220 13% 85%;
+  /* Darker border for better definition */
+  --border-secondary: 220 13% 90%;
+  --border-glass: 220 13% 85% / 0.6;
+  --input-border: 220 13% 80%;
   --input-focus: var(--accent-hue) var(--accent-sat) var(--accent-light);
 
   /* Accents */
