@@ -1,4 +1,3 @@
-import { useMemo } from 'react'
 import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import type { WorkflowState } from '@/types'
@@ -45,13 +44,11 @@ export function invalidateHaccpQueries(queryClient: QueryClient, siteId?: string
 }
 
 export function useHaccpWorkflows(siteId: string | undefined, states: WorkflowState[] = LIVE_HACCP_STATES) {
-  const stableStates = useMemo(() => [...states], [states.join('|')])
-
   return useQuery({
-    queryKey: HACCP_KEYS.workflowList(siteId, stableStates),
+    queryKey: HACCP_KEYS.workflowList(siteId, states),
     queryFn: async () => {
       if (!siteId) return []
-      return fetchHaccpWorkflows(siteId, stableStates)
+      return fetchHaccpWorkflows(siteId, states)
     },
     enabled: !!siteId,
     refetchInterval: 1000 * 60,
