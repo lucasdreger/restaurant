@@ -11,7 +11,7 @@ interface UseVoiceFridgeFlowOptions {
     onConfirm: (data: { fridgeId: string; temperature: number; staffId: string }) => Promise<void> | void
     onOpenModal: (fridgeIndex?: number) => void
     onCloseModal: () => void
-    speak: (text: string, options?: { rate?: number; pitch?: number; onComplete?: () => void }) => void
+    speak: (text: string, options?: { rate?: number; pitch?: number; onComplete?: () => void; preferRealtime?: boolean }) => void
     onAwaitingInput?: () => void
     onStopListening?: () => void
 }
@@ -132,11 +132,13 @@ export function useVoiceFridgeFlow({
         awaiting_staff: 0,
         awaiting_confirmation: 0,
     })
+    const processingRef = useRef(false)
 
     const activeStaff = useMemo(() => staffMembers.filter((s) => s.active), [staffMembers])
 
     const reset = useCallback(() => {
         setState({ step: 'idle', fridgeId: null, fridgeIndex: null, staffId: null, temperature: null })
+        processingRef.current = false
         retryRef.current = {
             idle: 0,
             awaiting_fridge: 0,
@@ -164,6 +166,8 @@ export function useVoiceFridgeFlow({
 
     const startFlow = useCallback(
         (fridgeNumber?: string) => {
+            if (state.step !== 'idle') return
+
             let preselectedFridge: Fridge | undefined
             let preselectedIndex: number | undefined
 
@@ -203,6 +207,7 @@ export function useVoiceFridgeFlow({
                 retryRef.current.awaiting_temperature = 0
                 const label = preselectedFridge.fridge_code ? `Fridge ${preselectedFridge.fridge_code}` : preselectedFridge.name
                 speak(`${label} selected. What is the temperature?`, {
+                    preferRealtime: true,
                     onComplete: () => onAwaitingInput?.()
                 })
             } else {
@@ -215,19 +220,20 @@ export function useVoiceFridgeFlow({
                     temperature: null
                 })
                 retryRef.current.awaiting_fridge = 0
-                speak('Opening fridge temperature logger.')
+                speak('Opening fridge temperature logger.', { preferRealtime: true })
                 const fridgeList = fridges.map((f, i) => `${f.fridge_code || (i + 1)} ${f.name}`).join(', ')
                 speak(`I found ${fridges.length} fridges. ${fridgeList}. Which one are you checking?`, {
+                    preferRealtime: true,
                     onComplete: () => onAwaitingInput?.()
                 })
             }
         },
-        [fridges, onOpenModal, speak, onAwaitingInput]
+        [fridges, onOpenModal, speak, onAwaitingInput, state.step]
     )
 
     const handleTranscript = useCallback(
         async (transcript: string) => {
-            if (state.step === 'idle') return
+            if (state.step === 'idle' || processingRef.current) return
 
             const cleaned = normalizeVoiceInput(transcript)
 
@@ -235,6 +241,7 @@ export function useVoiceFridgeFlow({
                 speak('Cancelled.')
                 onCloseModal()
                 reset()
+                processingRef.current = false
                 return
             }
 
@@ -268,7 +275,10 @@ export function useVoiceFridgeFlow({
                 onOpenModal(foundIndex)
                 const label = fridge.fridge_code ? `Fridge ${fridge.fridge_code}` : fridge.name
                 speak(`Selected ${label}. What is the temperature?`, {
-                    onComplete: () => onAwaitingInput?.()
+                    onComplete: () => {
+                        processingRef.current = false
+                        onAwaitingInput?.()
+                    }
                 })
                 return
             }
@@ -288,7 +298,10 @@ export function useVoiceFridgeFlow({
                 retryRef.current.awaiting_temperature = 0
                 retryRef.current.awaiting_staff = 0
                 speak(`${num} degrees. What is your staff code?`, {
-                    onComplete: () => onAwaitingInput?.()
+                    onComplete: () => {
+                        processingRef.current = false
+                        onAwaitingInput?.()
+                    }
                 })
                 return
             }
@@ -312,7 +325,10 @@ export function useVoiceFridgeFlow({
                 const fridge = fridges.find(f => f.id === state.fridgeId)
                 const fridgeLabel = fridge?.fridge_code ? `Fridge ${fridge.fridge_code}` : fridge?.name || 'Fridge'
                 speak(`Log ${state.temperature} degrees for ${fridgeLabel} by ${staff.name}? Say confirm to save.`, {
-                    onComplete: () => onAwaitingInput?.()
+                    onComplete: () => {
+                        processingRef.current = false
+                        onAwaitingInput?.()
+                    }
                 })
                 return
             }
@@ -331,6 +347,7 @@ export function useVoiceFridgeFlow({
                     speak('Temperature logged successfully.')
                     onCloseModal()
                     reset()
+                    processingRef.current = false
                     return
                 }
                 if (isNegativeResponse(cleaned)) {
@@ -341,7 +358,12 @@ export function useVoiceFridgeFlow({
                     })
                     return
                 }
-                promptRetryOrFallback('awaiting_confirmation', 'Say confirm to save, or cancel.')
+                speak('Say confirm to save, or cancel.', {
+                    onComplete: () => {
+                        processingRef.current = false
+                        onAwaitingInput?.()
+                    }
+                })
                 return
             }
         },
@@ -358,13 +380,27 @@ export function useVoiceFridgeFlow({
                 return true
             }
 
+            // Single-shot confirmations
+            if (state.step === 'awaiting_confirmation') {
+                if (isPositiveConfirmation(cleaned) || isNegativeResponse(cleaned)) {
+                    console.log('[VoiceFridgeFlow] Interim: Detected clear confirmation/rejection, processing instantly')
+                    
+                    // Process immediately by calling handleTranscript with the mapped response
+                    handleTranscript(cleaned).catch(console.error)
+                    
+                    // Then stop listening to avoid double processing when final transcript arrives
+                    onStopListening?.()
+                    return true
+                }
+            }
+
             // IMPORTANT:
             // Do not stop early on interim numeric/confirmation guesses.
             // In Realtime mode this can cut audio before final transcript is emitted.
             // Let final transcript or post-speech timeout close naturally.
             return false
         },
-        [state.step, onStopListening]
+        [state.step, onStopListening, handleTranscript]
     )
 
     const isQuickResponseStep = state.step === 'awaiting_temperature' || state.step === 'awaiting_staff'

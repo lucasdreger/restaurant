@@ -298,6 +298,358 @@ export type Database = {
           },
         ]
       }
+      haccp_batches: {
+        Row: {
+          created_at: string
+          current_workflow_id: string | null
+          id: string
+          item_category: string
+          item_name: string
+          last_recorded_at: string | null
+          last_temperature: number | null
+          location_id: string | null
+          location_kind: string
+          location_label: string | null
+          site_id: string
+          source_workflow_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          current_workflow_id?: string | null
+          id?: string
+          item_category?: string
+          item_name: string
+          last_recorded_at?: string | null
+          last_temperature?: number | null
+          location_id?: string | null
+          location_kind?: string
+          location_label?: string | null
+          site_id: string
+          source_workflow_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          current_workflow_id?: string | null
+          id?: string
+          item_category?: string
+          item_name?: string
+          last_recorded_at?: string | null
+          last_temperature?: number | null
+          location_id?: string | null
+          location_kind?: string
+          location_label?: string | null
+          site_id?: string
+          source_workflow_id?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "haccp_batches_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "sites"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      haccp_reminders: {
+        Row: {
+          acknowledged_at: string | null
+          batch_id: string
+          created_at: string
+          delivered_at: string | null
+          delivery_state: string
+          due_at: string
+          id: string
+          reminder_type: string
+          site_id: string
+          workflow_id: string
+        }
+        Insert: {
+          acknowledged_at?: string | null
+          batch_id: string
+          created_at?: string
+          delivered_at?: string | null
+          delivery_state?: string
+          due_at: string
+          id?: string
+          reminder_type: string
+          site_id: string
+          workflow_id: string
+        }
+        Update: {
+          acknowledged_at?: string | null
+          batch_id?: string
+          created_at?: string
+          delivered_at?: string | null
+          delivery_state?: string
+          due_at?: string
+          id?: string
+          reminder_type?: string
+          site_id?: string
+          workflow_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "haccp_reminders_batch_id_fkey"
+            columns: ["batch_id"]
+            isOneToOne: false
+            referencedRelation: "haccp_batches"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "haccp_reminders_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "sites"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "haccp_reminders_workflow_id_fkey"
+            columns: ["workflow_id"]
+            isOneToOne: false
+            referencedRelation: "haccp_workflows"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      haccp_workflow_events: {
+        Row: {
+          batch_id: string
+          created_at: string
+          event_type: string
+          id: string
+          payload: Json
+          site_id: string
+          workflow_id: string
+        }
+        Insert: {
+          batch_id: string
+          created_at?: string
+          event_type: string
+          id?: string
+          payload?: Json
+          site_id: string
+          workflow_id: string
+        }
+        Update: {
+          batch_id?: string
+          created_at?: string
+          event_type?: string
+          id?: string
+          payload?: Json
+          site_id?: string
+          workflow_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "haccp_workflow_events_batch_id_fkey"
+            columns: ["batch_id"]
+            isOneToOne: false
+            referencedRelation: "haccp_batches"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "haccp_workflow_events_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "sites"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "haccp_workflow_events_workflow_id_fkey"
+            columns: ["workflow_id"]
+            isOneToOne: false
+            referencedRelation: "haccp_workflows"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      haccp_workflows: {
+        Row: {
+          batch_id: string
+          completed_at: string | null
+          completed_by_id: string | null
+          completed_by_name: string | null
+          corrective_action: string | null
+          created_at: string
+          due_at: string | null
+          end_temperature: number | null
+          id: string
+          item_category: string
+          item_name: string
+          last_temperature: number | null
+          location_id: string | null
+          location_kind: string
+          location_label: string | null
+          next_due_at: string | null
+          notes: string | null
+          parent_workflow_id: string | null
+          revalidation_interval_minutes: number | null
+          severity: string | null
+          site_id: string
+          start_temperature: number | null
+          started_at: string
+          started_by_id: string | null
+          started_by_name: string | null
+          state: string
+          title: string
+          updated_at: string
+          workflow_kind: string
+        }
+        Insert: {
+          batch_id: string
+          completed_at?: string | null
+          completed_by_id?: string | null
+          completed_by_name?: string | null
+          corrective_action?: string | null
+          created_at?: string
+          due_at?: string | null
+          end_temperature?: number | null
+          id?: string
+          item_category?: string
+          item_name: string
+          last_temperature?: number | null
+          location_id?: string | null
+          location_kind?: string
+          location_label?: string | null
+          next_due_at?: string | null
+          notes?: string | null
+          parent_workflow_id?: string | null
+          revalidation_interval_minutes?: number | null
+          severity?: string | null
+          site_id: string
+          start_temperature?: number | null
+          started_at?: string
+          started_by_id?: string | null
+          started_by_name?: string | null
+          state?: string
+          title: string
+          updated_at?: string
+          workflow_kind: string
+        }
+        Update: {
+          batch_id?: string
+          completed_at?: string | null
+          completed_by_id?: string | null
+          completed_by_name?: string | null
+          corrective_action?: string | null
+          created_at?: string
+          due_at?: string | null
+          end_temperature?: number | null
+          id?: string
+          item_category?: string
+          item_name?: string
+          last_temperature?: number | null
+          location_id?: string | null
+          location_kind?: string
+          location_label?: string | null
+          next_due_at?: string | null
+          notes?: string | null
+          parent_workflow_id?: string | null
+          revalidation_interval_minutes?: number | null
+          severity?: string | null
+          site_id?: string
+          start_temperature?: number | null
+          started_at?: string
+          started_by_id?: string | null
+          started_by_name?: string | null
+          state?: string
+          title?: string
+          updated_at?: string
+          workflow_kind?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "haccp_workflows_batch_id_fkey"
+            columns: ["batch_id"]
+            isOneToOne: false
+            referencedRelation: "haccp_batches"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "haccp_workflows_completed_by_id_fkey"
+            columns: ["completed_by_id"]
+            isOneToOne: false
+            referencedRelation: "staff_members"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "haccp_workflows_parent_workflow_id_fkey"
+            columns: ["parent_workflow_id"]
+            isOneToOne: false
+            referencedRelation: "haccp_workflows"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "haccp_workflows_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "sites"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "haccp_workflows_started_by_id_fkey"
+            columns: ["started_by_id"]
+            isOneToOne: false
+            referencedRelation: "staff_members"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      push_subscriptions: {
+        Row: {
+          auth: string
+          created_at: string
+          endpoint: string
+          id: string
+          p256dh: string
+          site_id: string
+          updated_at: string
+          user_agent: string | null
+          user_id: string
+        }
+        Insert: {
+          auth: string
+          created_at?: string
+          endpoint: string
+          id?: string
+          p256dh: string
+          site_id: string
+          updated_at?: string
+          user_agent?: string | null
+          user_id: string
+        }
+        Update: {
+          auth?: string
+          created_at?: string
+          endpoint?: string
+          id?: string
+          p256dh?: string
+          site_id?: string
+          updated_at?: string
+          user_agent?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "push_subscriptions_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "sites"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "push_subscriptions_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       sites: {
         Row: {
           address: string | null
@@ -855,6 +1207,11 @@ export type StaffMember = Tables<'staff_members'>
 export type FoodItem = Tables<'food_items'>
 export type CoolingSession = Tables<'cooling_sessions'>
 export type CoolingEvent = Tables<'cooling_events'>
+export type HaccpBatch = Tables<'haccp_batches'>
+export type HaccpWorkflow = Tables<'haccp_workflows'>
+export type HaccpWorkflowEvent = Tables<'haccp_workflow_events'>
+export type HaccpReminder = Tables<'haccp_reminders'>
+export type PushSubscription = Tables<'push_subscriptions'>
 export type Alert = Tables<'alerts'>
 export type ComplianceReport = Tables<'compliance_reports'>
 export type ComplianceLog = Tables<'compliance_logs'>
@@ -870,6 +1227,11 @@ export type DeliveryImage = Tables<'delivery_images'>
 export type StaffMemberInsert = TablesInsert<'staff_members'>
 export type FoodItemInsert = TablesInsert<'food_items'>
 export type CoolingSessionInsert = TablesInsert<'cooling_sessions'>
+export type HaccpBatchInsert = TablesInsert<'haccp_batches'>
+export type HaccpWorkflowInsert = TablesInsert<'haccp_workflows'>
+export type HaccpWorkflowEventInsert = TablesInsert<'haccp_workflow_events'>
+export type HaccpReminderInsert = TablesInsert<'haccp_reminders'>
+export type PushSubscriptionInsert = TablesInsert<'push_subscriptions'>
 export type CustomerInsert = TablesInsert<'customers'>
 export type GoodsReceiptInsert = TablesInsert<'goods_receipts'>
 export type GoodsReceiptItemInsert = TablesInsert<'goods_receipt_items'>
@@ -880,6 +1242,10 @@ export type DeliveryImageInsert = TablesInsert<'delivery_images'>
 
 // Update types
 export type CoolingSessionUpdate = TablesUpdate<'cooling_sessions'>
+export type HaccpBatchUpdate = TablesUpdate<'haccp_batches'>
+export type HaccpWorkflowUpdate = TablesUpdate<'haccp_workflows'>
+export type HaccpReminderUpdate = TablesUpdate<'haccp_reminders'>
+export type PushSubscriptionUpdate = TablesUpdate<'push_subscriptions'>
 export type StaffMemberUpdate = TablesUpdate<'staff_members'>
 export type CustomerUpdate = TablesUpdate<'customers'>
 export type GoodsReceiptUpdate = TablesUpdate<'goods_receipts'>

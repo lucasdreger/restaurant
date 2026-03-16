@@ -10,7 +10,7 @@ interface UseVoiceCloseFlowOptions {
   onConfirm: (sessionId: string, data: CloseCoolingData) => Promise<void> | void
   onOpenModal: (sessionId: string) => void
   onCloseModal?: () => void
-  speak: (text: string, options?: { rate?: number; pitch?: number; onComplete?: () => void }) => void
+  speak: (text: string, options?: { rate?: number; pitch?: number; onComplete?: () => void; preferRealtime?: boolean }) => void
   onAwaitingInput?: () => void
   onStopListening?: () => void // Called to immediately stop listening when valid input detected
 }
@@ -140,6 +140,7 @@ export function useVoiceCloseFlow({
     awaiting_temperature: 0,
     awaiting_confirmation: 0,
   })
+  const processingRef = useRef(false)
 
   const activeStaff = useMemo(() => staffMembers.filter((staff) => staff.active), [staffMembers])
 
@@ -167,6 +168,7 @@ export function useVoiceCloseFlow({
 
   const reset = useCallback(() => {
     setState({ step: 'idle', sessionId: null, staffId: null })
+    processingRef.current = false
     retryRef.current = {
       idle: 0,
       awaiting_staff: 0,
@@ -199,6 +201,8 @@ export function useVoiceCloseFlow({
 
   const startFlow = useCallback(
     (item?: string) => {
+      if (state.step !== 'idle') return
+
       const session = resolveSession(item)
       if (!session) {
         speak(item ? `No active cooling session found for ${item}.` : 'No active cooling sessions found.')
@@ -208,19 +212,22 @@ export function useVoiceCloseFlow({
       setState({ step: 'awaiting_staff', sessionId: session.id, staffId: null })
       retryRef.current.awaiting_staff = 0
       speak(`Closing ${session.item_name}. What is your staff code?`, {
+        preferRealtime: true,
         onComplete: () => onAwaitingInput?.()
       })
     },
-    [resolveSession, onOpenModal, speak, onAwaitingInput]
+    [resolveSession, onOpenModal, speak, onAwaitingInput, state.step]
   )
 
   const handleTranscript = useCallback(
     async (transcript: string) => {
       // Ignore if not in active flow
-      if (state.step === 'idle') {
-        console.log('[VoiceCloseFlow] Ignoring transcript - flow is idle')
+      if (state.step === 'idle' || processingRef.current) {
+        console.log('[VoiceCloseFlow] Ignoring transcript - flow is idle or already processing')
         return
       }
+
+      processingRef.current = true
 
       // Natural interaction: remove wake words if user accidentally says them again
       const cleaned = normalizeVoiceInput(transcript)
@@ -232,6 +239,7 @@ export function useVoiceCloseFlow({
         speak('Closing cancelled.')
         onCloseModal?.()
         reset()
+        processingRef.current = false
         return
       }
 
@@ -242,6 +250,7 @@ export function useVoiceCloseFlow({
         if (!staffCode) {
           console.log('[VoiceCloseFlow] No code found in:', cleaned)
           promptRetryOrFallback('awaiting_staff', "I didn't catch a number. Please say your staff code.")
+          processingRef.current = false
           return
         }
 
@@ -252,6 +261,7 @@ export function useVoiceCloseFlow({
 
         if (!staff) {
           promptRetryOrFallback('awaiting_staff', `I could not find a staff member with code ${staffCode}. Please try again.`)
+          processingRef.current = false
           return
         }
 
@@ -259,7 +269,10 @@ export function useVoiceCloseFlow({
         retryRef.current.awaiting_staff = 0
         retryRef.current.awaiting_temperature = 0
         speak(`Recognized ${staff.name}. What is the final temperature?`, {
-          onComplete: () => onAwaitingInput?.()
+          onComplete: () => {
+            processingRef.current = false
+            onAwaitingInput?.()
+          }
         })
         return
       }
@@ -274,10 +287,12 @@ export function useVoiceCloseFlow({
           const num = findNumber(cleaned)
           if (num === null || Number.isNaN(num)) {
             promptRetryOrFallback('awaiting_temperature', 'I did not catch that temperature. Please say the number, or say skip.')
+            processingRef.current = false
             return
           }
           if (num < -30 || num > 130) {
             promptRetryOrFallback('awaiting_temperature', `That sounds out of range. I heard ${num}. Please repeat the temperature.`)
+            processingRef.current = false
             return
           }
           temperatureValue = num
@@ -292,7 +307,10 @@ export function useVoiceCloseFlow({
 
         const tempText = temperatureValue !== undefined ? `${temperatureValue} degrees celsius` : 'temperature skipped'
         speak(`Summary: ${sessionMatched?.item_name || 'Item'}, by ${staffMatched?.name || 'staff'}, ${tempText}. Say confirm to save, or cancel.`, {
-          onComplete: () => onAwaitingInput?.()
+          onComplete: () => {
+            processingRef.current = false
+            onAwaitingInput?.()
+          }
         })
         return
       }
@@ -313,6 +331,7 @@ export function useVoiceCloseFlow({
           speak('Successfully saved. Cooling record closed.')
           reset()
           onCloseModal?.()
+          processingRef.current = false
           return
         }
         if (isNegativeResponse(cleaned)) {
@@ -346,6 +365,21 @@ export function useVoiceCloseFlow({
         return true
       }
 
+      // Single-shot confirmations
+      if (state.step === 'awaiting_confirmation') {
+        if (isPositiveConfirmation(cleaned) || isNegativeResponse(cleaned)) {
+          console.log('[VoiceCloseFlow] Interim: Detected clear confirmation/rejection, processing instantly')
+          
+          // Process immediately by calling handleTranscript with the mapped response
+          // We don't await because checkInterimTranscript is synchronous, but handleTranscript is async safe
+          handleTranscript(cleaned).catch(console.error)
+          
+          // Then stop listening to avoid double processing when final transcript arrives
+          onStopListening?.()
+          return true
+        }
+      }
+
       // IMPORTANT:
       // Do not stop early on interim numeric/confirmation guesses.
       // In Realtime mode this can cut audio before a final transcript event is emitted,
@@ -353,7 +387,7 @@ export function useVoiceCloseFlow({
       // Let final transcript or post-speech timeout close naturally.
       return false
     },
-    [state.step, onStopListening]
+    [state.step, onStopListening, handleTranscript]
   )
 
   // Determine if current step expects a quick response (staff code, temperature)

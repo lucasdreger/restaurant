@@ -97,14 +97,15 @@ export function KioskHome({
 
   // Handle auto-start voice listening after TTS completes
   const handleAwaitingInput = useCallback(() => {
+    // When Realtime is the conversation provider, the mic stays open — no re-trigger needed
+    if (voiceButtonRef.current?.isRealtimeConversation) {
+      console.log('[KioskHome] Voice flow awaiting input — Realtime mic already open, skipping triggerVoice')
+      return
+    }
     console.log('[KioskHome] Voice flow awaiting input - triggering voice button after TTS')
-    // Delay to ensure TTS audio has completely finished playing
-    // and system isn't capturing its own voice
-    setTimeout(() => {
-      if (voiceButtonRef.current) {
-        voiceButtonRef.current.triggerVoice()
-      }
-    }, 800) // 800ms delay to avoid capturing TTS echo
+    if (voiceButtonRef.current) {
+      voiceButtonRef.current.triggerVoice()
+    }
   }, [])
 
   // Handle stopping voice listening when valid input is detected (called by checkInterimTranscript)
@@ -410,6 +411,7 @@ export function KioskHome({
                 wakeWordTriggered={wakeWordTriggered}
                 wakeWordLabel={primaryWakeWordLabel}
                 conversationMode={voiceCloseFlow.step !== 'idle'}
+                quickResponseMode={voiceCloseFlow.isQuickResponseStep}
               />
             </div>
           ) : (
@@ -459,6 +461,7 @@ export function KioskHome({
                   wakeWordTriggered={wakeWordTriggered}
                   wakeWordLabel={primaryWakeWordLabel}
                   conversationMode={voiceCloseFlow.step !== 'idle'}
+                  quickResponseMode={voiceCloseFlow.isQuickResponseStep}
                 />
               </div>
             </>

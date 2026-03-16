@@ -149,18 +149,20 @@ export async function deleteFridge(fridgeId: string): Promise<void> {
 
 // Log a temperature reading
 export async function logFridgeTemp(log: CreateFridgeTempLog): Promise<FridgeTempLog> {
+  console.log('[logFridgeTemp] Insert Payload:', log);
+  
   if (!isSupabaseConfigured()) {
     // Demo mode - return mock log
     return {
-      id: `demo-log-${Date.now()}`,
-      site_id: log.site_id,
+      id: crypto.randomUUID(),
       fridge_id: log.fridge_id,
+      site_id: log.site_id,
       temperature: log.temperature,
       recorded_by: log.recorded_by || null,
       recorded_by_name: log.recorded_by_name || null,
       notes: log.notes || null,
       is_compliant: log.temperature >= 0 && log.temperature <= 5,
-      created_at: new Date().toISOString(),
+      created_at: new Date().toISOString()
     }
   }
 
@@ -170,7 +172,10 @@ export async function logFridgeTemp(log: CreateFridgeTempLog): Promise<FridgeTem
     .select()
     .single()
 
-  if (error) throw error
+  if (error) {
+    console.error('[logFridgeTemp] Insert Error:', error);
+    throw error;
+  }
   return data
 }
 

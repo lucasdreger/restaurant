@@ -22,7 +22,10 @@ const STOP_INTENT_WORDS = [
   'fridge',
   'finis',
 ]
-const COOLING_VARIANTS = ['cooling', 'coolin', 'kulin', 'culing', 'kooling', 'culling', 'comi', 'cool']
+const COOLING_VARIANTS = ['cooling', 'coolin', 'kulin', 'culing', 'kooling', 'culling', 'comi', 'cool', 'pulling']
+const COOKING_VARIANTS = ['cooking', 'cook', 'cookingg']
+const REHEATING_VARIANTS = ['reheating', 'reheat', 'heated']
+const HOT_HOLD_VARIANTS = ['hot hold', 'hot-hold', 'holding', 'hold']
 const IGNORE_STOP_TOKENS = new Set([
   'hey',
   'hi',
@@ -81,10 +84,81 @@ function extractItemFromNoisyStop(text: string): string | undefined {
     .trim() || undefined
 }
 
+function toDisplayItem(item: string | undefined): string | undefined {
+  if (!item) return undefined
+  const normalizedItem = item.trim().toLowerCase()
+  if (!normalizedItem) return undefined
+
+  const preset = FOOD_ITEM_PRESETS.find(
+    (presetItem) =>
+      presetItem.name.toLowerCase() === normalizedItem ||
+      presetItem.name.toLowerCase().includes(normalizedItem) ||
+      presetItem.id === normalizedItem
+  )
+
+  if (preset) return preset.name
+
+  return normalizedItem
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((token) => token.charAt(0).toUpperCase() + token.slice(1))
+    .join(' ')
+}
+
+function parseTemperature(text: string): number | undefined {
+  const match = text.match(/-?\d+(?:\.\d+)?/)
+  if (match) return Number(match[0])
+
+  const words = text.split(/\s+/).filter(Boolean)
+  const units: Record<string, number> = {
+    zero: 0,
+    one: 1,
+    two: 2,
+    three: 3,
+    four: 4,
+    five: 5,
+    six: 6,
+    seven: 7,
+    eight: 8,
+    nine: 9,
+    ten: 10,
+    eleven: 11,
+    twelve: 12,
+    thirteen: 13,
+    fourteen: 14,
+    fifteen: 15,
+    sixteen: 16,
+    seventeen: 17,
+    eighteen: 18,
+    nineteen: 19,
+    twenty: 20,
+    thirty: 30,
+    forty: 40,
+    fifty: 50,
+    sixty: 60,
+    seventy: 70,
+    eighty: 80,
+    ninety: 90,
+  }
+
+  let result: number | undefined
+  for (const word of words) {
+    if (word in units) {
+      result = (result ?? 0) + units[word]
+    }
+  }
+
+  return result
+}
+
 export function getVoiceFeedback(command: VoiceCommand): string | null {
   switch (command.type) {
     case 'start_cooling':
-      return command.item ? `Starting cooling for ${command.item}` : 'Starting cooling'
+      return null // We rely on the component (e.g. KioskHome) to speak "Cooling started for X" to avoid duplicate TTS delays
+    case 'start_cooking':
+    case 'start_reheating':
+    case 'start_hot_hold':
+      return null
     case 'stop_cooling':
       return command.item ? `Finishing cooling for ${command.item}` : 'Finishing cooling'
     case 'discard':
@@ -101,6 +175,7 @@ export function parseVoiceCommand(transcript: string): VoiceCommand {
   const cleaned = lower
     .replace(/\s+/g, ' ')
     .replace(/^(?:hey|hi|okay|ok)\s+luma\s*/i, '')
+    .replace(/^luma\s+/i, '')
     .replace(/^(?:please|can you|could you|would you)\s+/i, '')
     .trim()
 
@@ -115,15 +190,101 @@ export function parseVoiceCommand(transcript: string): VoiceCommand {
     return { type: 'noise' }
   }
 
+  const cookingPatternStr = COOKING_VARIANTS.join('|')
+  const reheatingPatternStr = REHEATING_VARIANTS.join('|')
+  const hotHoldPatternStr = HOT_HOLD_VARIANTS.join('|')
+
+  // ========================================
+  // HOT HOLD COMMANDS
+  // ========================================
+  const hotHoldStartMatch = cleaned.match(new RegExp(`^(?:start|begin)\\s+(?:${hotHoldPatternStr})\\s+(?:for\\s+)?(.+)$`, 'i'))
+  if (hotHoldStartMatch) {
+    return {
+      type: 'start_hot_hold',
+      item: toDisplayItem(hotHoldStartMatch[1]),
+    }
+  }
+
+  const hotHoldCheckMatch = cleaned.match(/^(.+?)\s+(?:is\s+at|at)\s+(.+?)\s*(?:degrees?|celsius)?$/i)
+  if (hotHoldCheckMatch && !/(cool|fridge|reheat|cook)/i.test(cleaned)) {
+    const temperature = parseTemperature(hotHoldCheckMatch[2])
+    if (typeof temperature === 'number') {
+      return {
+        type: 'log_hot_hold_check',
+        item: hotHoldCheckMatch[1].trim().toLowerCase(),
+        temperature,
+      }
+    }
+  }
+
+  // ========================================
+  // COOKING / REHEATING COMMANDS
+  // ========================================
+  const cookingStartMatch = cleaned.match(new RegExp(`^(?:start|begin)\\s+(?:${cookingPatternStr})\\s+(.+)$`, 'i'))
+  if (cookingStartMatch) {
+    return {
+      type: 'start_cooking',
+      item: toDisplayItem(cookingStartMatch[1]),
+    }
+  }
+
+  const cookingFinishMatch = cleaned.match(
+    new RegExp(`^(?:finish|complete|done)\\s+(?:the\\s+)?(?:${cookingPatternStr})\\s+(.+?)(?:\\s+at\\s+(.+?))?\\s*(?:degrees?|celsius)?$`, 'i'),
+  )
+  if (cookingFinishMatch) {
+    return {
+      type: 'complete_cooking',
+      item: toDisplayItem(cookingFinishMatch[1]),
+      temperature: cookingFinishMatch[2] ? parseTemperature(cookingFinishMatch[2]) : undefined,
+    }
+  }
+
+  const cookingCompleteMatch = cleaned.match(new RegExp(`^(?:${cookingPatternStr})\\s+(?:complete|completed|done)(?:\\s+at\\s+(.+?))?\\s*(?:degrees?|celsius)?$`, 'i'))
+  if (cookingCompleteMatch) {
+    return {
+      type: 'complete_cooking',
+      temperature: cookingCompleteMatch[1] ? parseTemperature(cookingCompleteMatch[1]) : undefined,
+    }
+  }
+
+  const reheatingStartMatch = cleaned.match(new RegExp(`^(?:start\\s+)?(?:${reheatingPatternStr})\\s+(?:the\\s+)?(.+)$`, 'i'))
+  if (reheatingStartMatch && !/(?:complete|completed|done)\b/i.test(cleaned)) {
+    return {
+      type: 'start_reheating',
+      item: toDisplayItem(reheatingStartMatch[1].replace(/\s+(?:from\s+the\s+fridge.*|from\s+fridge.*)$/i, '')),
+    }
+  }
+
+  const reheatingFinishMatch = cleaned.match(
+    new RegExp(`^(?:finish|complete|done)\\s+(?:the\\s+)?(?:${reheatingPatternStr})\\s+(.+?)(?:\\s+at\\s+(.+?))?\\s*(?:degrees?|celsius)?$`, 'i'),
+  )
+  if (reheatingFinishMatch) {
+    return {
+      type: 'complete_reheating',
+      item: toDisplayItem(reheatingFinishMatch[1]),
+      temperature: reheatingFinishMatch[2] ? parseTemperature(reheatingFinishMatch[2]) : undefined,
+    }
+  }
+
+  const reheatingCompleteMatch = cleaned.match(new RegExp(`^(?:${reheatingPatternStr})\\s+(?:complete|completed|done)(?:\\s+at\\s+(.+?))?\\s*(?:degrees?|celsius)?$`, 'i'))
+  if (reheatingCompleteMatch) {
+    return {
+      type: 'complete_reheating',
+      temperature: reheatingCompleteMatch[1] ? parseTemperature(reheatingCompleteMatch[1]) : undefined,
+    }
+  }
+
   // ========================================
   // START COOLING COMMANDS
   // ========================================
-  // We still need specific patterns to extract the ITEM name
+  const coolingPatternStr = COOLING_VARIANTS.join('|')
   const startPatterns = [
-    /^(?:hey\s+)?(?:luma\s+)?(?:start|begin|new)\s*(?:cooling|cool)?\s*(.*)$/i,
-    /^(?:hey\s+)?(?:luma\s+)?(?:cool|cooling)\s*(.*)$/i,
-    /^(?:please\s+)?(?:can you\s+)?(?:could you\s+)?(?:would you\s+)?(?:start|begin|new)\s*(?:cooling|cool)?\s*(.*)$/i,
-    /^(?:please\s+)?(?:can you\s+)?(?:could you\s+)?(?:would you\s+)?(?:cool|cooling)\s*(.*)$/i,
+    new RegExp(`^(?:hey\\s+)?(?:luma\\s+)?(?:start|begin|new)\\s*(?:${coolingPatternStr})?\\s*(.*)$`, 'i'),
+    new RegExp(`^(?:hey\\s+)?(?:luma\\s+)?(?:${coolingPatternStr})\\s*(.*)$`, 'i'),
+    new RegExp(`^(?:please\\s+)?(?:can you\\s+)?(?:could you\\s+)?(?:would you\\s+)?(?:start|begin|new)\\s*(?:${coolingPatternStr})?\\s*(.*)$`, 'i'),
+    new RegExp(`^(?:please\\s+)?(?:can you\\s+)?(?:could you\\s+)?(?:would you\\s+)?(?:${coolingPatternStr})\\s*(.*)$`, 'i'),
+    // Aggressive fallback for words joined together by ASR (e.g. "startkulling")
+    /^(?:hey\s+)?(?:luma\s+)?start[a-z]*\s+(.*)$/i,
   ]
 
   for (const pattern of startPatterns) {
@@ -133,13 +294,14 @@ export function parseVoiceCommand(transcript: string): VoiceCommand {
       const normalizedItem = itemName?.toLowerCase()
 
       // Filter out "cooling" if captured as the item name erroneously
-      if (normalizedItem === 'cooling' || !normalizedItem) {
+      if (!normalizedItem || COOLING_VARIANTS.includes(normalizedItem)) {
         continue;
       }
 
       // Check against specific start phrases to be sure (double check)
-      // This helps avoid misinterpreting "cooling done" as "cooling [done]" item
-      const isStartCommand = VOICE_PHRASES.startCooling.some(p => cleaned.includes(p))
+      // If it has explicit "start/begin/new", we trust it. Otherwise must be in VOICE_PHRASES.
+      const hasExplicitStart = /^(?:hey\s+)?(?:luma\s+)?(?:start|begin|new|start[a-z]*)\b/i.test(cleaned)
+      const isStartCommand = hasExplicitStart || VOICE_PHRASES.startCooling.some(p => cleaned.includes(p)) || COOLING_VARIANTS.some(v => cleaned.includes(v))
       if (!isStartCommand) continue
 
       const hasItem = Boolean(normalizedItem && normalizedItem.length > 1)
@@ -166,10 +328,10 @@ export function parseVoiceCommand(transcript: string): VoiceCommand {
   // STOP/CLOSE COOLING COMMANDS
   // ========================================
   const stopPatterns = [
-    /^(?:hey\s+)?(?:luma\s+)?(?<action>stop|done|close|finish|finished|complete)\s*(?:cooling)?\s*(?<item>.*)$/i,
-    /^(?:hey\s+)?(?:luma\s+)?(?:cooling)\s*(?:done|finished|complete|finish)\s*(?<item>.*)$/i,
+    new RegExp(`^(?:hey\\s+)?(?:luma\\s+)?(?<action>stop|done|close|finish|finished|complete|pull|pulling|pulled)\\s*(?:${coolingPatternStr})?\\s*(?<item>.*)$`, 'i'),
+    new RegExp(`^(?:hey\\s+)?(?:luma\\s+)?(?:${coolingPatternStr})\\s*(?:done|finished|complete|finish)\\s*(?<item>.*)$`, 'i'),
     /^(?:hey\s+)?(?:luma\s+)?(?<item>.*)\s+(?:done|finished|complete|finish)$/i,
-    /^(?:please\s+)?(?:can you\s+)?(?:could you\s+)?(?:would you\s+)?(?<action>stop|done|close|finish|finished|complete)\s*(?:cooling)?\s*(?<item>.*)$/i,
+    new RegExp(`^(?:please\\s+)?(?:can you\\s+)?(?:could you\\s+)?(?:would you\\s+)?(?<action>stop|done|close|finish|finished|complete|pull|pulling|pulled)\\s*(?:${coolingPatternStr})?\\s*(?<item>.*)$`, 'i'),
     /^(?:please\s+)?(?:can you\s+)?(?:could you\s+)?(?:would you\s+)?(?:move to fridge|in fridge)\s*(?<item>.*)$/i,
   ]
 

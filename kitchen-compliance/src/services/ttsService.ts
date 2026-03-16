@@ -21,6 +21,7 @@ type SpeakOptions = {
     onEnd?: () => void
     onError?: (error: any) => void
     force?: boolean // If true, clears queue and speaks immediately
+    preferRealtime?: boolean // Bypasses React state delay to force WebRTC audio
 }
 
 type QueueItem = {
@@ -31,7 +32,7 @@ type QueueItem = {
 
 class TTSService {
     private audioCache: Map<string, string> = new Map() // text -> blobUrl
-    private useOpenAI: boolean = false
+    private useOpenAI: boolean = true
     private openAIVoice: 'alloy' | 'echo' | 'fable' | 'onyx' | 'nova' | 'shimmer' = 'alloy'
 
     // Restored properties

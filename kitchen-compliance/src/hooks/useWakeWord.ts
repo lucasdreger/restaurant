@@ -370,7 +370,7 @@ export function useWakeWord(options: UseWakeWordOptions) {
           isInCommandModeRef.current = false
           startListening()
         }
-      }, 1000)
+      }, 400)
     }
   }, [enabled, startListening])
 

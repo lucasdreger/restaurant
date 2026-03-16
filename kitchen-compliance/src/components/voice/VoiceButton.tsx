@@ -12,7 +12,9 @@ import { getVoiceFeedback, parseVoiceCommand } from '@/lib/voiceCommands'
 export interface VoiceButtonHandle {
   triggerVoice: () => void
   stopVoice: () => void
-  speakText: (text: string, options?: { onStart?: () => void; onComplete?: () => void; rate?: number; pitch?: number }) => boolean
+  speakText: (text: string, options?: { onStart?: () => void; onComplete?: () => void; rate?: number; pitch?: number; preferRealtime?: boolean }) => boolean
+  /** True when conversation mode is using Realtime API (mic stays open, no triggerVoice needed after TTS) */
+  isRealtimeConversation: boolean
 }
 
 export type VoiceInteractionState =
@@ -67,19 +69,27 @@ export const VoiceButton = forwardRef<VoiceButtonHandle, VoiceButtonProps>(
     const lastWakeWordTriggerTokenRef = useRef(0)
 
     // Provider selection
-    const useRealtime = settings.voiceProvider === 'realtime'
+    // In conversation mode, always force Realtime for full-duplex interaction
+    // (wake word + commands stay on free browser speech)
+    const realtimeIsSupported =
+      typeof window !== 'undefined' &&
+      typeof RTCPeerConnection !== 'undefined'
+    const useRealtimeForConversation = conversationMode && realtimeIsSupported
+    const useRealtime = useRealtimeForConversation || settings.voiceProvider === 'realtime'
     // Use Whisper (via Edge Function) when selected — no API key needed client-side
-    const useWhisper = settings.voiceProvider === 'whisper'
-    const providerLabel = useWhisper
-      ? 'Whisper (Edge Function)'
-      : useRealtime
-        ? 'Realtime (OpenAI)'
-        : 'Browser'
+    const useWhisper = !useRealtimeForConversation && settings.voiceProvider === 'whisper'
+    const providerLabel = useRealtimeForConversation
+      ? 'Realtime (Conversation)'
+      : useWhisper
+        ? 'Whisper (Edge Function)'
+        : useRealtime
+          ? 'Realtime (OpenAI)'
+          : 'Browser'
 
     // DEBUG: Log voice provider selection
     useEffect(() => {
-      console.log('[VoiceButton] voiceProvider:', settings.voiceProvider, '| useWhisper:', useWhisper, '| useRealtime:', useRealtime, '| conversationMode:', conversationMode)
-    }, [settings.voiceProvider, useWhisper, useRealtime, conversationMode])
+      console.log('[VoiceButton] voiceProvider:', settings.voiceProvider, '| useWhisper:', useWhisper, '| useRealtime:', useRealtime, '| useRealtimeForConversation:', useRealtimeForConversation, '| conversationMode:', conversationMode)
+    }, [settings.voiceProvider, useWhisper, useRealtime, useRealtimeForConversation, conversationMode])
 
     // Handle command with voice feedback - defined early so hooks can use it
     const handleCommand = useCallback((command: VoiceCommand) => {
@@ -142,10 +152,10 @@ export const VoiceButton = forwardRef<VoiceButtonHandle, VoiceButtonProps>(
       onEnd: handleEnd,
       // Continuous mode is more resilient for interview flows on noisy devices.
       continuous: conversationMode || useRealtime,
-      silenceTimeout: conversationMode ? 10000 : useRealtime ? 2600 : 4500,
+      silenceTimeout: conversationMode ? 6000 : useRealtime ? 2600 : 4500,
       // Conversation answers (staff code/temp) can be slightly longer ("one point five"),
       // so allow more time after speech is detected.
-      postSpeechTimeout: conversationMode ? 2500 : useRealtime ? 850 : 1300,
+      postSpeechTimeout: conversationMode ? 1800 : useRealtime ? 850 : 1300,
       // In conversation mode, never stall the flow waiting for a final result that may never come.
       flushInterimAsFinalOnEnd: conversationMode || useRealtime,
       // Also ensure "no-speech" doesn't stall the interview; let the flow prompt retries.
@@ -264,7 +274,11 @@ export const VoiceButton = forwardRef<VoiceButtonHandle, VoiceButtonProps>(
         console.log('[VoiceButton] Triggered via ref. Mode:', { conversationMode, useWhisper, provider })
         console.log('[VoiceButton] isListening:', isListening, 'isProcessing:', isProcessing, 'isConnecting:', realtimeIsConnecting)
 
-        if (!isListening && !isProcessing && !realtimeIsConnecting) {
+        if (isProcessing || realtimeIsConnecting) {
+          console.log('[VoiceButton] Skipping - still processing or connecting')
+        } else if (isListening) {
+          console.log('[VoiceButton] Already listening - reusing active session')
+        } else {
           if (startListening) {
             console.log('[VoiceButton] Calling startListening for provider:', provider)
             startListening()
@@ -272,8 +286,6 @@ export const VoiceButton = forwardRef<VoiceButtonHandle, VoiceButtonProps>(
             console.log('[VoiceButton] Calling toggleListening (fallback)')
             toggleListening()
           }
-        } else {
-          console.log('[VoiceButton] Skipping - already listening or processing')
         }
       },
       stopVoice: () => {
@@ -297,7 +309,9 @@ export const VoiceButton = forwardRef<VoiceButtonHandle, VoiceButtonProps>(
           options.onComplete?.()
         }
 
-        if (useRealtime) {
+        const shouldRealtime = useRealtime || !!options.preferRealtime
+
+        if (shouldRealtime) {
           void realtimeVoice.speakText?.(text, {
             onStart: startOnce,
             onComplete: completeOnce,
@@ -320,6 +334,7 @@ export const VoiceButton = forwardRef<VoiceButtonHandle, VoiceButtonProps>(
         })
         return false
       },
+      isRealtimeConversation: useRealtimeForConversation,
     }), [
       conversationMode,
       isListening,
@@ -331,6 +346,7 @@ export const VoiceButton = forwardRef<VoiceButtonHandle, VoiceButtonProps>(
       stopListening,
       toggleListening,
       useRealtime,
+      useRealtimeForConversation,
       useWhisper,
     ])
 
@@ -375,14 +391,19 @@ export const VoiceButton = forwardRef<VoiceButtonHandle, VoiceButtonProps>(
     useEffect(() => {
       if (
         wasConversationModeRef.current &&
-        !conversationMode &&
-        useRealtime &&
-        isListening
+        !conversationMode
       ) {
-        stopListening()
+        // Flow just ended — stop all providers and disconnect Realtime
+        if (isListening) {
+          stopListening()
+        }
+        // Also ensure Realtime is fully disconnected
+        if (realtimeVoice.isListening || realtimeVoice.isSpeaking) {
+          realtimeVoice.stopListening()
+        }
       }
       wasConversationModeRef.current = conversationMode
-    }, [conversationMode, isListening, stopListening, useRealtime])
+    }, [conversationMode, isListening, stopListening, realtimeVoice.isListening, realtimeVoice.isSpeaking, realtimeVoice.stopListening])
 
     // Pre-warm realtime session when conversation flow starts, so the first answer opens instantly.
     useEffect(() => {
@@ -543,20 +564,20 @@ export const VoiceButton = forwardRef<VoiceButtonHandle, VoiceButtonProps>(
         <button
           onClick={toggleListening}
           disabled={isProcessing || realtimeIsConnecting}
-          className={cn(
-            'voice-button rounded-full flex items-center justify-center transition-all duration-200',
-            sizeClasses[size],
-            isProcessing || realtimeIsConnecting
-              ? 'bg-purple-500 shadow-lg shadow-purple-500/50'
-              : realtimeIsSpeaking
-                ? 'bg-amber-500 shadow-lg shadow-amber-500/50'
-              : isListening
-                ? 'voice-listening bg-green-500 shadow-lg shadow-green-500/50'
-                : wakeWordActive
-                  ? 'bg-gradient-to-b from-rose-600 to-rose-700 hover:from-rose-500 hover:to-rose-600 shadow-lg shadow-rose-500/30 ring-2 ring-rose-500/50'
-                  : 'bg-purple-500 hover:bg-purple-600 shadow-lg shadow-purple-500/30',
-            'active:scale-95 disabled:opacity-70'
-          )}
+            className={cn(
+              'voice-button rounded-full flex items-center justify-center transition-all duration-200',
+              sizeClasses[size],
+              isProcessing || realtimeIsConnecting
+                ? 'bg-purple-500 shadow-lg shadow-purple-500/50 voice-glow-purple'
+                : realtimeIsSpeaking
+                  ? 'bg-amber-500 shadow-lg shadow-amber-500/50 voice-glow-amber'
+                : isListening
+                  ? 'voice-listening bg-green-500 shadow-lg shadow-green-500/50'
+                  : wakeWordActive
+                    ? 'bg-gradient-to-b from-rose-600 to-rose-700 hover:from-rose-500 hover:to-rose-600 shadow-lg shadow-rose-500/30 voice-glow-rose ring-2 ring-rose-500/50'
+                    : 'bg-purple-500 hover:bg-purple-600 shadow-lg shadow-purple-500/30',
+              'active:scale-95 disabled:opacity-70'
+            )}
           aria-label={isListening ? 'Stop listening' : 'Start voice command'}
         >
           {isProcessing || realtimeIsConnecting ? (

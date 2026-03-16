@@ -3,6 +3,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { supabase, isSupabaseConfigured } from '@/lib/supabase'
 import { COOLING_KEYS } from '@/hooks/queries/useCooling'
+import { HACCP_KEYS } from '@/hooks/queries/useHaccp'
 import { STAFF_KEYS } from '@/hooks/queries/useStaff'
 import { SETTINGS_KEYS } from '@/hooks/queries/useSiteSettings'
 import { SITE_KEYS } from '@/hooks/queries/useCurrentSite'
@@ -78,6 +79,35 @@ export function useRealtimeSync({ siteId, userId }: UseRealtimeSyncOptions) {
 
         const channel = supabase
             .channel(`site-live:${siteId}`)
+            .on(
+                'postgres_changes',
+                { event: '*', schema: 'public', table: 'haccp_workflows', filter: `site_id=eq.${siteId}` },
+                () => {
+                    queryClient.invalidateQueries({ queryKey: HACCP_KEYS.all })
+                    queryClient.invalidateQueries({ queryKey: VENUE_STATS_KEYS.all })
+                }
+            )
+            .on(
+                'postgres_changes',
+                { event: '*', schema: 'public', table: 'haccp_batches', filter: `site_id=eq.${siteId}` },
+                () => {
+                    queryClient.invalidateQueries({ queryKey: HACCP_KEYS.all })
+                }
+            )
+            .on(
+                'postgres_changes',
+                { event: '*', schema: 'public', table: 'haccp_workflow_events', filter: `site_id=eq.${siteId}` },
+                () => {
+                    queryClient.invalidateQueries({ queryKey: HACCP_KEYS.all })
+                }
+            )
+            .on(
+                'postgres_changes',
+                { event: '*', schema: 'public', table: 'haccp_reminders', filter: `site_id=eq.${siteId}` },
+                () => {
+                    queryClient.invalidateQueries({ queryKey: HACCP_KEYS.all })
+                }
+            )
             .on(
                 'postgres_changes',
                 { event: '*', schema: 'public', table: 'cooling_sessions', filter: `site_id=eq.${siteId}` },

@@ -100,18 +100,18 @@ export function FridgeSettings({ onPlanUpgrade }: FridgeSettingsProps) {
             <div className="card-stunning p-6">
                 <div className="flex items-center justify-between mb-6">
                     <div className="flex items-center gap-3">
-                        <div className="p-3 rounded-xl bg-cyan-500/10 text-cyan-600">
+                        <div className="p-3 rounded-xl border border-cyan-500/20 bg-cyan-500/12 text-cyan-700 shadow-theme-sm">
                             <Thermometer className="w-6 h-6" />
                         </div>
                         <div>
-                            <h2 className="text-lg font-bold">Fridge Management</h2>
-                            <p className="text-sm text-theme-secondary">
+                            <h2 className="text-lg font-bold tracking-tight text-theme-primary">Fridge Management</h2>
+                            <p className="text-sm font-medium text-theme-secondary">
                                 {fridgeList.length} / {fridgeLimit === Infinity ? '∞' : fridgeLimit} fridges
                                 <span className={cn(
-                                    "ml-2 text-xs px-2 py-0.5 rounded-full",
-                                    settings.subscriptionTier === 'basic' ? "bg-zinc-100 text-zinc-600" :
-                                        settings.subscriptionTier === 'pro' ? "bg-purple-100 text-purple-600" :
-                                            "bg-amber-100 text-amber-600"
+                                    "ml-2 inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.12em]",
+                                    settings.subscriptionTier === 'basic' ? "border-zinc-300 bg-zinc-100 text-zinc-700" :
+                                        settings.subscriptionTier === 'pro' ? "border-purple-200 bg-purple-100 text-purple-700" :
+                                            "border-amber-200 bg-amber-100 text-amber-700"
                                 )}>
                                     {settings.subscriptionTier || 'basic'}
                                 </span>
@@ -121,13 +121,13 @@ export function FridgeSettings({ onPlanUpgrade }: FridgeSettingsProps) {
                 </div>
 
                 {/* Add New Fridge */}
-                <div className="bg-theme-ghost p-4 rounded-xl border border-theme-primary/50 mb-6">
+                <div className="mb-6 rounded-xl border border-theme-primary bg-theme-secondary p-4 shadow-theme-sm">
                     <div className="flex gap-3">
                         <input
                             value={newFridgeName}
                             onChange={e => setNewFridgeName(e.target.value)}
                             placeholder="New fridge name (e.g., Walk-in Cooler)"
-                            className="input-stunning flex-1"
+                            className="input-stunning flex-1 border-theme-primary bg-theme-card text-theme-primary placeholder:text-theme-secondary"
                             onKeyDown={e => e.key === 'Enter' && handleAddFridge()}
                             disabled={!canAddMoreFridges}
                         />
@@ -135,15 +135,17 @@ export function FridgeSettings({ onPlanUpgrade }: FridgeSettingsProps) {
                             onClick={handleAddFridge}
                             disabled={!canAddMoreFridges}
                             className={cn(
-                                "btn-stunning px-6",
-                                canAddMoreFridges ? "btn-primary" : "opacity-50 cursor-not-allowed"
+                                "btn-stunning px-6 border",
+                                canAddMoreFridges
+                                    ? "btn-primary border-transparent"
+                                    : "cursor-not-allowed border-theme-primary bg-theme-card text-theme-muted opacity-80"
                             )}
                         >
                             <Plus className="w-4 h-4" /> Add
                         </button>
                     </div>
                     {!canAddMoreFridges && (
-                        <p className="text-xs text-amber-500 mt-2 flex items-center gap-1">
+                        <p className="mt-2 flex items-center gap-1 text-xs font-medium text-amber-600">
                             <ShieldCheck className="w-3 h-3" />
                             Upgrade your subscription to add more fridges
                         </p>
@@ -164,10 +166,10 @@ export function FridgeSettings({ onPlanUpgrade }: FridgeSettingsProps) {
                     {fridgeList.map((fridge, index) => (
                         <div
                             key={fridge.id}
-                            className="flex items-center justify-between p-4 bg-theme-ghost rounded-xl border border-theme-primary hover:border-cyan-500/50 transition-colors group"
+                            className="group flex items-center justify-between rounded-xl border border-theme-primary bg-theme-card p-4 shadow-theme-sm transition-colors hover:border-cyan-500/50 hover:bg-theme-elevated"
                         >
                             <div className="flex items-center gap-4 flex-1">
-                                <div className="w-10 h-10 rounded-xl bg-cyan-100 text-cyan-600 flex items-center justify-center font-bold text-lg">
+                                <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-cyan-500/15 bg-cyan-500/12 font-bold text-lg text-cyan-700">
                                     {index + 1}
                                 </div>
 
@@ -176,7 +178,7 @@ export function FridgeSettings({ onPlanUpgrade }: FridgeSettingsProps) {
                                         <input
                                             value={editingFridgeName}
                                             onChange={e => setEditingFridgeName(e.target.value)}
-                                            className="input-stunning flex-1"
+                                            className="input-stunning flex-1 border-theme-primary bg-theme-secondary text-theme-primary placeholder:text-theme-secondary"
                                             autoFocus
                                             onKeyDown={e => {
                                                 if (e.key === 'Enter') handleUpdateFridgeName(fridge.id)
@@ -198,8 +200,8 @@ export function FridgeSettings({ onPlanUpgrade }: FridgeSettingsProps) {
                                     </div>
                                 ) : (
                                     <div className="flex-1">
-                                        <h3 className="font-semibold">{fridge.name}</h3>
-                                        <p className="text-xs text-theme-secondary">
+                                        <h3 className="font-semibold text-theme-primary">{fridge.name}</h3>
+                                        <p className="text-sm font-medium text-theme-secondary">
                                             Target: {fridge.min_temp}°C – {fridge.max_temp}°C (FSAI SC1)
                                         </p>
                                     </div>
@@ -207,17 +209,17 @@ export function FridgeSettings({ onPlanUpgrade }: FridgeSettingsProps) {
                             </div>
 
                             {editingFridgeId !== fridge.id && (
-                                <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <div className="flex items-center gap-2 opacity-0 transition-opacity group-hover:opacity-100">
                                     <button
                                         onClick={() => startEditingFridge(fridge)}
-                                        className="p-2 text-theme-secondary hover:text-cyan-500 hover:bg-cyan-50 rounded-lg transition-colors"
+                                        className="rounded-lg p-2 text-theme-secondary transition-colors hover:bg-cyan-50 hover:text-cyan-600"
                                         title="Rename fridge"
                                     >
                                         <Edit2 className="w-4 h-4" />
                                     </button>
                                     <button
                                         onClick={() => handleDeleteFridge(fridge.id)}
-                                        className="p-2 text-theme-secondary hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                                        className="rounded-lg p-2 text-theme-secondary transition-colors hover:bg-red-50 hover:text-red-600"
                                         title="Delete fridge"
                                     >
                                         <Trash2 className="w-4 h-4" />
@@ -231,10 +233,10 @@ export function FridgeSettings({ onPlanUpgrade }: FridgeSettingsProps) {
                 {/* Subscription Upgrade Hint */}
                 {settings.subscriptionTier === 'basic' && (
                     <div className="mt-6 p-4 rounded-xl bg-gradient-to-r from-purple-500/10 to-cyan-500/10 border border-purple-500/20">
-                        <p className="text-sm font-medium text-purple-600 mb-1">
+                        <p className="mb-1 text-sm font-semibold text-purple-700">
                             Need more fridges?
                         </p>
-                        <p className="text-xs text-theme-secondary">
+                        <p className="text-sm text-theme-secondary">
                             Upgrade to <strong>Pro</strong> for 2 fridges, or <strong>Enterprise</strong> for unlimited fridges.
                         </p>
                         <button

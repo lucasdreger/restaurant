@@ -107,7 +107,7 @@ export function DashboardHeader({
           <h1 className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-theme-primary to-theme-secondary">
             Kitchen Command Center
           </h1>
-          <p className="text-sm text-theme-muted">Real-time cooling compliance monitoring</p>
+          <p className="text-sm text-theme-muted">Real-time HACCP workflow monitoring</p>
         </div>
         <div className="flex-1 max-w-md ml-auto">
           <div className="relative">
@@ -126,7 +126,7 @@ export function DashboardHeader({
         <h1 className="text-xl font-bold text-theme-primary">
           Command Center
         </h1>
-        <p className="text-xs text-theme-muted">Real-time cooling compliance</p>
+        <p className="text-xs text-theme-muted">Real-time HACCP workflows</p>
       </div>
     </header>
   )

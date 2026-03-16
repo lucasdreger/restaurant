@@ -91,6 +91,7 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions = {}) {
   const hardCleanupTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const connectionPromiseRef = useRef<Promise<void> | null>(null)
   const assistantResponseQueueRef = useRef<Array<(() => void) | undefined>>([])
+  const isSpeakingRef = useRef(false)
 
   const isSupported =
     typeof window !== 'undefined' &&
@@ -219,6 +220,7 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions = {}) {
       isListeningRef.current = false
       setIsListening(false)
       setIsSpeaking(false)
+      isSpeakingRef.current = false
       setConnectionState('disconnected')
 
       if (emitEnd) {
@@ -236,6 +238,7 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions = {}) {
       isListeningRef.current = false
       setIsListening(false)
       setIsSpeaking(false)
+      isSpeakingRef.current = false
       if (emitEnd) {
         onEndRef.current?.()
       }
@@ -429,10 +432,11 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions = {}) {
           return
         }
 
-        if (type === 'response.done') {
+        if (type === 'response.done' || type === 'response.cancelled') {
           const next = assistantResponseQueueRef.current.shift()
           if (assistantResponseQueueRef.current.length === 0) {
             setIsSpeaking(false)
+            isSpeakingRef.current = false
           }
           if (isListeningRef.current) {
             setInputEnabled(true)
@@ -448,6 +452,13 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions = {}) {
 
         if (type === 'input_audio_buffer.speech_started') {
           resetInactivityTimeout()
+          // Barge-in: if the user starts speaking while assistant is talking, cancel the response
+          if (isSpeakingRef.current) {
+            console.log('[RealtimeVoice] Barge-in detected — cancelling assistant response')
+            try {
+              dataChannelRef.current?.send(JSON.stringify({ type: 'response.cancel' }))
+            } catch { /* ignore send errors */ }
+          }
           return
         }
 
@@ -584,6 +595,7 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions = {}) {
         options.onStart?.()
         assistantResponseQueueRef.current.push(options.onComplete)
         setIsSpeaking(true)
+        isSpeakingRef.current = true
 
         if (isListeningRef.current) {
           setInputEnabled(false)
@@ -707,6 +719,14 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions = {}) {
     }
   }, [cleanupConnection])
 
+  const cancelResponse = useCallback(() => {
+    const dc = dataChannelRef.current
+    if (!dc || dc.readyState !== 'open') return
+    try {
+      dc.send(JSON.stringify({ type: 'response.cancel' }))
+    } catch { /* ignore */ }
+  }, [])
+
   return {
     isSupported,
     isListening,
@@ -720,5 +740,6 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions = {}) {
     speakText,
     startListening,
     stopListening,
+    cancelResponse,
   }
 }

@@ -83,6 +83,99 @@ export interface CoolingEvent {
   synced: boolean
 }
 
+export type WorkflowKind = 'cooking' | 'cooling' | 'reheating' | 'hot_hold'
+export type WorkflowState =
+  | 'active'
+  | 'awaiting_completion'
+  | 'completed'
+  | 'needs_action'
+  | 'discarded'
+  | 'cancelled'
+
+export type HaccpLocationKind = 'kitchen' | 'fridge' | 'hot_hold' | 'service' | 'unknown'
+export type HaccpHotHoldSeverity = 'pass' | 'warning' | 'critical'
+export type HaccpCorrectiveAction = 'reheat' | 'discard' | 'manual_override'
+
+export interface HaccpBatch {
+  id: string
+  site_id: string
+  item_name: string
+  item_category: FoodItemPreset['category']
+  source_workflow_id?: string | null
+  current_workflow_id?: string | null
+  location_kind: HaccpLocationKind
+  location_id?: string | null
+  location_label?: string | null
+  last_temperature?: number | null
+  last_recorded_at?: string | null
+  created_at: string
+  updated_at?: string | null
+}
+
+export interface HaccpWorkflow {
+  id: string
+  batch_id: string
+  site_id: string
+  workflow_kind: WorkflowKind
+  state: WorkflowState
+  parent_workflow_id?: string | null
+  title: string
+  item_name: string
+  item_category: FoodItemPreset['category']
+  started_at: string
+  completed_at?: string | null
+  due_at?: string | null
+  next_due_at?: string | null
+  revalidation_interval_minutes?: number | null
+  start_temperature?: number | null
+  end_temperature?: number | null
+  last_temperature?: number | null
+  severity?: HaccpHotHoldSeverity | null
+  corrective_action?: HaccpCorrectiveAction | null
+  notes?: string | null
+  location_kind: HaccpLocationKind
+  location_id?: string | null
+  location_label?: string | null
+  started_by_id?: string | null
+  started_by_name?: string | null
+  completed_by_id?: string | null
+  completed_by_name?: string | null
+  created_at: string
+  updated_at?: string | null
+}
+
+export interface HaccpWorkflowEvent {
+  id: string
+  workflow_id: string
+  batch_id: string
+  site_id: string
+  event_type:
+    | 'workflow_started'
+    | 'temperature_logged'
+    | 'workflow_completed'
+    | 'transition_requested'
+    | 'transition_completed'
+    | 'reminder_due'
+    | 'corrective_action_required'
+    | 'corrective_action_taken'
+    | 'workflow_cancelled'
+  payload: Record<string, unknown>
+  created_at: string
+}
+
+export interface HaccpReminder {
+  id: string
+  workflow_id: string
+  batch_id: string
+  site_id: string
+  reminder_type: 'hot_hold_check'
+  due_at: string
+  delivered_at?: string | null
+  acknowledged_at?: string | null
+  delivery_state: 'scheduled' | 'due' | 'delivered' | 'acknowledged' | 'cancelled'
+  created_at: string
+}
+
 // Site/location configuration
 export interface Site {
   id: string
@@ -163,6 +256,14 @@ export interface AppState {
 export type VoiceCommand =
   | { type: 'start_cooling'; item?: string }
   | { type: 'stop_cooling'; sessionId?: string; item?: string }
+  | { type: 'start_cooking'; item?: string }
+  | { type: 'complete_cooking'; item?: string; temperature?: number }
+  | { type: 'start_reheating'; item?: string }
+  | { type: 'complete_reheating'; item?: string; temperature?: number }
+  | { type: 'start_hot_hold'; item?: string }
+  | { type: 'log_hot_hold_check'; temperature?: number; item?: string }
+  | { type: 'stop_hot_hold'; item?: string }
+  | { type: 'transition_to_cooling'; item?: string; fridge?: string }
   | { type: 'discard'; sessionId?: string }
   | { type: 'log_fridge_temp'; fridgeNumber?: string }
   | { type: 'log_cooking' }

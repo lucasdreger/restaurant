@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from 'react'
+import { useState, useCallback, useMemo, useRef, useEffect } from 'react'
 import { X, Snowflake, Thermometer, User, CheckCircle, AlertTriangle } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { useAppStore } from '@/store/useAppStore'
@@ -13,6 +13,7 @@ interface CloseCoolingModalProps {
   session: CoolingSession | null
   preselectedStaffId?: string | null
   preselectedTemperature?: number | null
+  voiceStep?: string // 'idle' | 'awaiting_staff' | 'awaiting_temperature' | 'awaiting_confirmation'
 }
 
 // Quick temperature presets (common values)
@@ -25,12 +26,14 @@ export function CloseCoolingModal({
   session,
   preselectedStaffId,
   preselectedTemperature,
+  voiceStep,
 }: CloseCoolingModalProps) {
   const { currentSite } = useAppStore()
   const { data: staffMembers = [] } = useStaff(currentSite?.id)
   const initialPreselectedTemperature = preselectedTemperature ?? null
   const initialIsPreset =
     initialPreselectedTemperature !== null && TEMP_PRESETS.includes(initialPreselectedTemperature)
+  
   const [temperature, setTemperature] = useState<number | undefined>(() =>
     initialIsPreset ? initialPreselectedTemperature ?? undefined : undefined
   )
@@ -49,6 +52,19 @@ export function CloseCoolingModal({
   const [finalConfirmationRequired, setFinalConfirmationRequired] = useState(() =>
     Boolean(preselectedStaffId || initialPreselectedTemperature !== null)
   )
+
+  const temperatureRef = useRef<HTMLDivElement>(null)
+  const staffRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (voiceStep === 'awaiting_staff') {
+      staffRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    } else if (voiceStep === 'awaiting_temperature') {
+      temperatureRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    } else if (voiceStep === 'awaiting_confirmation') {
+      setFinalConfirmationRequired(true)
+    }
+  }, [voiceStep])
 
   // Filter active staff members
   const activeStaff = useMemo(() =>
@@ -109,9 +125,9 @@ export function CloseCoolingModal({
       />
 
       {/* Modal - Larger for touch */}
-      <div className="relative w-full sm:max-w-lg bg-theme-card rounded-t-3xl sm:rounded-2xl shadow-2xl border border-theme-primary max-h-[95vh] overflow-y-auto animate-slide-in">
+      <div className="relative w-full sm:max-w-lg bg-theme-card rounded-t-3xl sm:rounded-2xl shadow-2xl border border-theme-primary max-h-[95vh] flex flex-col animate-slide-in">
         {/* Header */}
-        <div className="flex items-center justify-between p-4 border-b border-theme-primary">
+        <div className="flex items-center justify-between p-4 border-b border-theme-primary shrink-0">
           <div className="flex items-center gap-3">
             <div className="p-2 bg-emerald-500/20 rounded-xl">
               <Snowflake className="w-6 h-6 text-emerald-400" />
@@ -130,7 +146,7 @@ export function CloseCoolingModal({
         </div>
 
         {/* Content */}
-        <div className="p-4 space-y-5">
+        <div className="p-4 space-y-5 overflow-y-auto">
           {/* Session Info */}
           <div className={cn(
             'p-4 rounded-xl border',
@@ -167,7 +183,7 @@ export function CloseCoolingModal({
           </div>
 
           {/* Staff Selection - Tile-based */}
-          <div>
+          <div ref={staffRef} className={cn("transition-all duration-300", voiceStep === 'awaiting_staff' && "ring-2 ring-purple-500 rounded-xl p-2")}>
             <div className="flex items-center justify-between mb-3">
               <label className="flex items-center gap-2 text-sm font-medium text-theme-secondary">
                 <User className="w-4 h-4 text-purple-400" />
@@ -220,7 +236,7 @@ export function CloseCoolingModal({
           </div>
 
           {/* Temperature Input */}
-          <div>
+          <div ref={temperatureRef} className={cn("transition-all duration-300", voiceStep === 'awaiting_temperature' && "ring-2 ring-sky-500 rounded-xl p-2")}>
             <div className="flex items-center justify-between mb-3">
               <label className="flex items-center gap-2 text-sm font-medium text-theme-secondary">
                 <Thermometer className="w-4 h-4 text-sky-400" />
