@@ -68,6 +68,33 @@ export function shouldShowWorkflowOnBoard(workflow: HaccpWorkflow, nowMs: number
   return nowMs - new Date(updatedAt).getTime() < BOARD_COMPLETED_RETENTION_MS
 }
 
+export function getBoardVisibleWorkflows(workflows: HaccpWorkflow[], nowMs: number = Date.now()) {
+  const completedParentsWithActiveNextStep = new Set(
+    workflows
+      .filter(
+        (workflow) =>
+          workflow.parent_workflow_id &&
+          workflow.state !== 'cancelled' &&
+          workflow.state !== 'discarded',
+      )
+      .map((workflow) => workflow.parent_workflow_id as string),
+  )
+
+  return workflows.filter((workflow) => {
+    if (!shouldShowWorkflowOnBoard(workflow, nowMs)) return false
+
+    if (
+      workflow.workflow_kind === 'cooking' &&
+      workflow.state === 'completed' &&
+      completedParentsWithActiveNextStep.has(workflow.id)
+    ) {
+      return false
+    }
+
+    return true
+  })
+}
+
 export function getHotHoldReminderAlert(dueAt?: string | null, nowMs: number = Date.now()) {
   if (!dueAt) {
     return {

@@ -1,6 +1,6 @@
 import { useCallback, useState, useEffect, useRef } from 'react'
 import { browserSpeechService } from '@/services/browserSpeechService'
-import { useAppStore } from '@/store/useAppStore'
+import { useAppStoreShallow } from '@/store/useAppStore'
 
 interface UseBrowserSpeechOptions {
   onTranscript?: (transcript: string, isFinal: boolean) => void
@@ -54,7 +54,9 @@ export function useBrowserSpeech(options: UseBrowserSpeechOptions = {}) {
   const emitEmptyFinalRef = useRef(emitEmptyFinalOnNoSpeech)
   const shouldFlushOnEndRef = useRef(false)
   
-  const { settings } = useAppStore()
+  const { language } = useAppStoreShallow((state) => ({
+    language: state.settings.language,
+  }))
 
   const isSupported = browserSpeechService.isSupported
 
@@ -64,8 +66,6 @@ export function useBrowserSpeech(options: UseBrowserSpeechOptions = {}) {
     emitEmptyFinalRef.current = emitEmptyFinalOnNoSpeech
 
     browserSpeechService.onResult((result) => {
-      console.log('[useBrowserSpeech] Result:', result, 'speechDetected:', speechDetectedRef.current)
-
       // Keep the latest transcript so we can flush it if the browser never emits a final
       // (common when we stop recognition early on a short answer like "one"). 
       lastHeardRef.current = result.transcript
@@ -82,13 +82,11 @@ export function useBrowserSpeech(options: UseBrowserSpeechOptions = {}) {
       if (hasText) {
         if (!speechDetectedRef.current) {
           speechDetectedRef.current = true
-          console.log('[useBrowserSpeech] Speech detected! Starting post-speech timeout:', postSpeechTimeout, 'ms')
         }
 
         if (postSpeechTimeout > 0) {
           if (timeoutRef.current) clearTimeout(timeoutRef.current)
           timeoutRef.current = setTimeout(() => {
-            console.log('[useBrowserSpeech] Post-speech inactivity timeout reached, stopping...')
             if (isListeningRef.current) {
               browserSpeechService.stop()
             }
@@ -112,7 +110,6 @@ export function useBrowserSpeech(options: UseBrowserSpeechOptions = {}) {
     })
 
     browserSpeechService.onError((errorMessage) => {
-      console.error('[useBrowserSpeech] Error:', errorMessage)
       // Clear timeout on error
       if (timeoutRef.current) {
         clearTimeout(timeoutRef.current)
@@ -125,14 +122,11 @@ export function useBrowserSpeech(options: UseBrowserSpeechOptions = {}) {
     })
 
     browserSpeechService.onEnd(() => {
-      console.log('[useBrowserSpeech] Ended')
-
       // If we never got a final result, optionally treat last interim as final.
       // This prevents flows from "stalling" after short answers (e.g. "one").
       if ((shouldFlushOnEndRef.current || flushEnabledRef.current) && !sawFinalRef.current && speechDetectedRef.current) {
         const text = lastHeardRef.current.trim()
         if (text.length > 0) {
-          console.log('[useBrowserSpeech] Flushing interim as final:', text)
           setTranscript(text)
           setInterimTranscript('')
           onTranscript?.(text, true)
@@ -142,7 +136,6 @@ export function useBrowserSpeech(options: UseBrowserSpeechOptions = {}) {
       // If no speech was detected at all, optionally emit an empty final transcript.
       // This gives interview flows a chance to prompt retry instead of doing nothing.
       if (emitEmptyFinalRef.current && !sawFinalRef.current && !speechDetectedRef.current) {
-        console.log('[useBrowserSpeech] No speech detected; emitting empty final transcript')
         setTranscript('')
         setInterimTranscript('')
         onTranscript?.('', true)
@@ -178,11 +171,9 @@ export function useBrowserSpeech(options: UseBrowserSpeechOptions = {}) {
     }
 
     if (isListeningRef.current) {
-      console.log('[useBrowserSpeech] Already listening')
       return
     }
 
-    console.log('[useBrowserSpeech] Starting - silence timeout:', silenceTimeout, 'ms')
     setTranscript('')
     setInterimTranscript('')
     setError(null)
@@ -194,7 +185,7 @@ export function useBrowserSpeech(options: UseBrowserSpeechOptions = {}) {
     shouldFlushOnEndRef.current = false
 
     browserSpeechService.start({
-      language: settings.language === 'en' ? 'en-IE' : settings.language,
+      language: language === 'en' ? 'en-IE' : language,
       continuous,
       interimResults: true,
     })
@@ -203,19 +194,17 @@ export function useBrowserSpeech(options: UseBrowserSpeechOptions = {}) {
     if (silenceTimeout > 0) {
       clearTimeoutIfActive()
       timeoutRef.current = setTimeout(() => {
-        console.log('[useBrowserSpeech] Silence timeout reached, stopping...')
         if (isListeningRef.current) {
           browserSpeechService.stop()
         }
       }, silenceTimeout)
     }
-  }, [isSupported, settings.language, continuous, silenceTimeout, onError, clearTimeoutIfActive])
+  }, [isSupported, language, continuous, silenceTimeout, onError, clearTimeoutIfActive])
 
   const stopListening = useCallback(() => {
     clearTimeoutIfActive()
     if (!isListeningRef.current) return
 
-    console.log('[useBrowserSpeech] Stopping...')
     shouldFlushOnEndRef.current = true
     browserSpeechService.stop()
   }, [clearTimeoutIfActive])
@@ -224,7 +213,6 @@ export function useBrowserSpeech(options: UseBrowserSpeechOptions = {}) {
     clearTimeoutIfActive()
     if (!isListeningRef.current) return
 
-    console.log('[useBrowserSpeech] Aborting...')
     shouldFlushOnEndRef.current = false
     browserSpeechService.abort()
     setIsListening(false)

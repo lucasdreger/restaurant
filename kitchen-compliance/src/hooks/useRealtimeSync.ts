@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { supabase, isSupabaseConfigured } from '@/lib/supabase'
@@ -25,12 +25,35 @@ interface RealtimeSyncState {
 
 export function useRealtimeSync({ siteId, userId }: UseRealtimeSyncOptions) {
     const queryClient = useQueryClient()
-    const debugEnabled = useMemo(
-        () => import.meta.env.DEV || import.meta.env.VITE_DEBUG_REALTIME === 'true',
-        []
-    )
+    const debugEnabled = import.meta.env.VITE_DEBUG_REALTIME === 'true'
     const [siteStatus, setSiteStatus] = useState<RealtimeChannelStatus>('idle')
     const [userStatus, setUserStatus] = useState<RealtimeChannelStatus>('idle')
+    const pendingInvalidationsRef = useRef(new Map<string, ReturnType<typeof setTimeout>>())
+
+    const scheduleInvalidate = useCallback(
+        (queryKey: readonly unknown[], delayMs = 120) => {
+            const cacheKey = JSON.stringify(queryKey)
+
+            if (pendingInvalidationsRef.current.has(cacheKey)) {
+                return
+            }
+
+            const timeoutId = setTimeout(() => {
+                pendingInvalidationsRef.current.delete(cacheKey)
+                queryClient.invalidateQueries({ queryKey, refetchType: 'active' })
+            }, delayMs)
+
+            pendingInvalidationsRef.current.set(cacheKey, timeoutId)
+        },
+        [queryClient]
+    )
+
+    useEffect(() => {
+        return () => {
+            pendingInvalidationsRef.current.forEach((timeoutId) => clearTimeout(timeoutId))
+            pendingInvalidationsRef.current.clear()
+        }
+    }, [])
 
     const mapSubscribeStatus = (status: string): RealtimeChannelStatus => {
         switch (status) {
@@ -70,11 +93,15 @@ export function useRealtimeSync({ siteId, userId }: UseRealtimeSyncOptions) {
 
     useEffect(() => {
         if (!siteId || !isSupabaseConfigured()) {
-            setSiteStatus('idle')
+            if (debugEnabled) {
+                setSiteStatus('idle')
+            }
             return
         }
 
-        setSiteStatus('connecting')
+        if (debugEnabled) {
+            setSiteStatus('connecting')
+        }
         notifyStatus('site', 'connecting')
 
         const channel = supabase
@@ -83,74 +110,86 @@ export function useRealtimeSync({ siteId, userId }: UseRealtimeSyncOptions) {
                 'postgres_changes',
                 { event: '*', schema: 'public', table: 'haccp_workflows', filter: `site_id=eq.${siteId}` },
                 () => {
-                    queryClient.invalidateQueries({ queryKey: HACCP_KEYS.all })
-                    queryClient.invalidateQueries({ queryKey: VENUE_STATS_KEYS.all })
+                    scheduleInvalidate(HACCP_KEYS.workflows())
+                    scheduleInvalidate(HACCP_KEYS.reminders(siteId))
+                    scheduleInvalidate(VENUE_STATS_KEYS.all)
                 }
             )
             .on(
                 'postgres_changes',
                 { event: '*', schema: 'public', table: 'haccp_batches', filter: `site_id=eq.${siteId}` },
                 () => {
-                    queryClient.invalidateQueries({ queryKey: HACCP_KEYS.all })
+                    scheduleInvalidate(HACCP_KEYS.workflows())
+                    scheduleInvalidate(HACCP_KEYS.lifecycles(siteId))
                 }
             )
             .on(
                 'postgres_changes',
                 { event: '*', schema: 'public', table: 'haccp_workflow_events', filter: `site_id=eq.${siteId}` },
                 () => {
-                    queryClient.invalidateQueries({ queryKey: HACCP_KEYS.all })
+                    scheduleInvalidate(HACCP_KEYS.workflows())
+                    scheduleInvalidate(HACCP_KEYS.lifecycles(siteId))
                 }
             )
             .on(
                 'postgres_changes',
                 { event: '*', schema: 'public', table: 'haccp_reminders', filter: `site_id=eq.${siteId}` },
                 () => {
-                    queryClient.invalidateQueries({ queryKey: HACCP_KEYS.all })
+                    scheduleInvalidate(HACCP_KEYS.reminders(siteId))
+                    scheduleInvalidate(VENUE_STATS_KEYS.all)
                 }
             )
             .on(
                 'postgres_changes',
                 { event: '*', schema: 'public', table: 'cooling_sessions', filter: `site_id=eq.${siteId}` },
                 () => {
-                    queryClient.invalidateQueries({ queryKey: COOLING_KEYS.active(siteId) })
-                    queryClient.invalidateQueries({ queryKey: COOLING_KEYS.history(siteId) })
-                    queryClient.invalidateQueries({ queryKey: VENUE_STATS_KEYS.all })
+                    scheduleInvalidate(COOLING_KEYS.active(siteId))
+                    scheduleInvalidate(COOLING_KEYS.history(siteId))
+                    scheduleInvalidate(VENUE_STATS_KEYS.all)
                 }
             )
             .on(
                 'postgres_changes',
                 { event: '*', schema: 'public', table: 'staff_members', filter: `site_id=eq.${siteId}` },
                 () => {
-                    queryClient.invalidateQueries({ queryKey: STAFF_KEYS.list(siteId) })
-                    queryClient.invalidateQueries({ queryKey: VENUE_STATS_KEYS.all })
+                    scheduleInvalidate(STAFF_KEYS.list(siteId))
+                    scheduleInvalidate(VENUE_STATS_KEYS.all)
                 }
             )
             .on(
                 'postgres_changes',
                 { event: '*', schema: 'public', table: 'site_settings', filter: `site_id=eq.${siteId}` },
                 () => {
-                    queryClient.invalidateQueries({ queryKey: SETTINGS_KEYS.site(siteId) })
+                    scheduleInvalidate(SETTINGS_KEYS.site(siteId))
                 }
             )
             .subscribe((status) => {
                 const mapped = mapSubscribeStatus(status)
-                setSiteStatus(mapped)
+                if (debugEnabled) {
+                    setSiteStatus(mapped)
+                }
                 notifyStatus('site', mapped)
             })
 
         return () => {
-            setSiteStatus('idle')
+            if (debugEnabled) {
+                setSiteStatus('idle')
+            }
             void supabase.removeChannel(channel)
         }
-    }, [siteId, queryClient])
+    }, [debugEnabled, siteId, scheduleInvalidate])
 
     useEffect(() => {
         if (!userId || !isSupabaseConfigured()) {
-            setUserStatus('idle')
+            if (debugEnabled) {
+                setUserStatus('idle')
+            }
             return
         }
 
-        setUserStatus('connecting')
+        if (debugEnabled) {
+            setUserStatus('connecting')
+        }
         notifyStatus('user', 'connecting')
 
         const channel = supabase
@@ -159,36 +198,40 @@ export function useRealtimeSync({ siteId, userId }: UseRealtimeSyncOptions) {
                 'postgres_changes',
                 { event: '*', schema: 'public', table: 'profiles', filter: `id=eq.${userId}` },
                 () => {
-                    queryClient.invalidateQueries({ queryKey: SITE_KEYS.current(userId) })
+                    scheduleInvalidate(SITE_KEYS.current(userId))
                 }
             )
             .on(
                 'postgres_changes',
                 { event: '*', schema: 'public', table: 'venue_members', filter: `user_id=eq.${userId}` },
                 () => {
-                    queryClient.invalidateQueries({ queryKey: SITE_KEYS.current(userId) })
-                    queryClient.invalidateQueries({ queryKey: VENUE_KEYS.user(userId) })
+                    scheduleInvalidate(SITE_KEYS.current(userId))
+                    scheduleInvalidate(VENUE_KEYS.user(userId))
                 }
             )
             .on(
                 'postgres_changes',
                 { event: '*', schema: 'public', table: 'venues', filter: `created_by=eq.${userId}` },
                 () => {
-                    queryClient.invalidateQueries({ queryKey: SITE_KEYS.current(userId) })
-                    queryClient.invalidateQueries({ queryKey: VENUE_KEYS.user(userId) })
+                    scheduleInvalidate(SITE_KEYS.current(userId))
+                    scheduleInvalidate(VENUE_KEYS.user(userId))
                 }
             )
             .subscribe((status) => {
                 const mapped = mapSubscribeStatus(status)
-                setUserStatus(mapped)
+                if (debugEnabled) {
+                    setUserStatus(mapped)
+                }
                 notifyStatus('user', mapped)
             })
 
         return () => {
-            setUserStatus('idle')
+            if (debugEnabled) {
+                setUserStatus('idle')
+            }
             void supabase.removeChannel(channel)
         }
-    }, [userId, queryClient])
+    }, [debugEnabled, userId, scheduleInvalidate])
 
     return {
         siteStatus,

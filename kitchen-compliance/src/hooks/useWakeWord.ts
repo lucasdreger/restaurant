@@ -122,7 +122,6 @@ export function useWakeWord(options: UseWakeWordOptions) {
 
   const [isSupported, setIsSupported] = useState(false)
   const [isActive, setIsActive] = useState(false)
-  const [lastHeard, setLastHeard] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   const recognitionRef = useRef<SpeechRecognition | null>(null)
@@ -140,6 +139,7 @@ export function useWakeWord(options: UseWakeWordOptions) {
   const pendingDetectionRef = useRef(false)
   const pendingCommandRef = useRef<string | null>(null)
   const wakeWordOnlyTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const lastHeardRef = useRef<string | null>(null)
 
   // Keep refs up to date
   useEffect(() => {
@@ -189,7 +189,6 @@ export function useWakeWord(options: UseWakeWordOptions) {
     recognition.lang = language
 
     recognition.onstart = () => {
-      console.log('[WakeWord] Listening for wake words:', wakeWordsRef.current.slice(0, 3).join(', '), '...')
       setIsActive(true)
       setError(null)
       isStartingRef.current = false
@@ -201,7 +200,6 @@ export function useWakeWord(options: UseWakeWordOptions) {
     }
 
     recognition.onend = () => {
-      console.log('[WakeWord] Recognition ended')
       setIsActive(false)
       recognitionRef.current = null
       isStartingRef.current = false
@@ -225,11 +223,9 @@ export function useWakeWord(options: UseWakeWordOptions) {
       // Auto-restart if still enabled (with backoff if we had errors)
       if (isEnabledRef.current && !isInCommandModeRef.current && !isAbortingRef.current) {
         const backoff = Math.min(10000, 1000 * Math.pow(2, consecutiveErrorsRef.current))
-        console.log(`[WakeWord] Retrying in ${backoff}ms (errors: ${consecutiveErrorsRef.current})`)
 
         restartTimeoutRef.current = setTimeout(() => {
           if (isEnabledRef.current && !isInCommandModeRef.current) {
-            console.log('[WakeWord] Auto-restarting...')
             startListening()
           }
         }, backoff)
@@ -244,8 +240,9 @@ export function useWakeWord(options: UseWakeWordOptions) {
         const transcript = result[0].transcript
         const isFinal = result.isFinal
 
-        // Update last heard for debugging
-        setLastHeard(transcript)
+        // Keep the last heard transcript in a ref so recognition doesn't rerender
+        // the whole dashboard tree on every interim ASR chunk.
+        lastHeardRef.current = transcript
 
         // Check for wake word using current wake words from ref
         if (containsWakeWord(transcript, wakeWordsRef.current)) {
@@ -260,12 +257,9 @@ export function useWakeWord(options: UseWakeWordOptions) {
 
           // FINAL DETECTION: Process result
           if (isFinal) {
-            console.log('[WakeWord] Final match found:', transcript)
-
             if (immediateCommand && immediateCommand.length >= 1) {
               // User said command in same breath as wake word (e.g., "Hey Luma done" or "Hey Luma finish cooling 2")
               // Reduced from > 3 to >= 1 to allow single numbers like "2" or "#2"
-              console.log('[WakeWord] Immediate command detected:', immediateCommand)
               if (wakeWordOnlyTimeoutRef.current) {
                 clearTimeout(wakeWordOnlyTimeoutRef.current)
                 wakeWordOnlyTimeoutRef.current = null
@@ -276,7 +270,6 @@ export function useWakeWord(options: UseWakeWordOptions) {
             } else {
               // Just wake word (for now). Keep a brief grace window to capture
               // "wake word + command" that often arrives in the next final chunk.
-              console.log('[WakeWord] Wake word only - waiting briefly for follow-up command')
               if (wakeWordOnlyTimeoutRef.current) {
                 clearTimeout(wakeWordOnlyTimeoutRef.current)
               }
@@ -293,7 +286,6 @@ export function useWakeWord(options: UseWakeWordOptions) {
           }
         } else if (isInCommandModeRef.current && isFinal) {
           // User spoke something AFTER the interim wake word but in a separate final result
-          console.log('[WakeWord] Command follow-up after wake word:', transcript)
           if (wakeWordOnlyTimeoutRef.current) {
             clearTimeout(wakeWordOnlyTimeoutRef.current)
             wakeWordOnlyTimeoutRef.current = null
@@ -306,8 +298,6 @@ export function useWakeWord(options: UseWakeWordOptions) {
     }
 
     recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
-      console.log('[WakeWord] Error:', event.error)
-
       // Don't count 'no-speech' as a hard error for backoff
       if (event.error !== 'no-speech') {
         consecutiveErrorsRef.current += 1
@@ -390,7 +380,7 @@ export function useWakeWord(options: UseWakeWordOptions) {
   return {
     isSupported,
     isActive,
-    lastHeard,
+    lastHeard: lastHeardRef.current,
     error,
     startListening,
     stopListening,

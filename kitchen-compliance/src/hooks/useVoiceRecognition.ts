@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { VoiceCommand } from '@/types'
 import { parseVoiceCommand } from '@/lib/voiceCommands'
 import { ttsService } from '@/services/ttsService'
-import { useAppStore } from '@/store/useAppStore'
+import { useAppStoreShallow } from '@/store/useAppStore'
 
 // Use refs for callbacks to avoid recreating recognition on every render
 
@@ -246,16 +246,19 @@ export function useTextToSpeech() {
   const [isSupported, setIsSupported] = useState(false)
   const [isSpeaking, setIsSpeaking] = useState(false)
 
-  const { settings } = useAppStore()
+  const { voiceProvider, ttsEnabled } = useAppStoreShallow((state) => ({
+    voiceProvider: state.settings.voiceProvider,
+    ttsEnabled: state.settings.ttsEnabled,
+  }))
 
   // Configure TTS service on mount/settings change
   // No API key needed — Edge Function handles that server-side
   useEffect(() => {
     ttsService.configure({
-      useOpenAI: settings.voiceProvider !== 'browser' && settings.ttsEnabled,
+      useOpenAI: voiceProvider !== 'browser' && ttsEnabled,
       voice: 'alloy' // Always use a valid TTS voice model
     })
-  }, [settings.voiceProvider, settings.ttsEnabled])
+  }, [ttsEnabled, voiceProvider])
 
   useEffect(() => {
     setIsSupported('speechSynthesis' in window)

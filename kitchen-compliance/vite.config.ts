@@ -1,7 +1,58 @@
 import { defineConfig } from 'vite'
-import react from '@vitejs/plugin-react'
+import react from '@vitejs/plugin-react-swc'
 import tailwindcss from '@tailwindcss/vite'
 import path from 'path'
+
+const FIRST_SCREEN_DEPS = [
+  'react',
+  'react-dom',
+  '@tanstack/react-query',
+  'zustand',
+  '@supabase/supabase-js',
+  'lucide-react',
+  'sonner',
+  'clsx',
+  'class-variance-authority',
+  'tailwind-merge',
+  'date-fns',
+  '@radix-ui/react-dialog',
+  '@radix-ui/react-scroll-area',
+  '@radix-ui/react-select',
+  '@radix-ui/react-separator',
+  '@radix-ui/react-switch',
+  '@radix-ui/react-tabs',
+  '@radix-ui/react-toast',
+]
+
+const DEV_WARMUP_CLIENT_FILES = [
+  './src/main.tsx',
+  './src/App.tsx',
+  './src/components/auth/AuthProvider.tsx',
+  './src/components/auth/auth-context.ts',
+  './src/components/screens/Dashboard.tsx',
+  './src/components/layout/DashboardHeader.tsx',
+  './src/components/layout/Sidebar.tsx',
+  './src/components/haccp/LegacyHaccpBoard.tsx',
+  './src/components/haccp/HaccpWorkflowDialogs.tsx',
+  './src/components/voice/VoiceButton.tsx',
+  './src/components/ui/LoadingScreen.tsx',
+  './src/store/useAppStore.ts',
+  './src/hooks/queries/useCurrentSite.ts',
+  './src/hooks/queries/useSiteSettings.ts',
+  './src/hooks/queries/useHaccp.ts',
+  './src/hooks/queries/useFridges.ts',
+  './src/hooks/queries/useStaff.ts',
+  './src/hooks/useRealtimeSync.ts',
+  './src/hooks/useBrowserSpeech.ts',
+  './src/hooks/useHaccpVoiceController.ts',
+  './src/hooks/useVoiceFridgeFlow.ts',
+  './src/hooks/useVoiceRecognition.ts',
+  './src/hooks/useWakeWord.ts',
+  './src/hooks/useWhisperVoice.ts',
+  './src/hooks/useRealtimeVoice.ts',
+  './src/services/browserSpeechService.ts',
+  './src/services/ttsService.ts',
+]
 
 // https://vite.dev/config/
 export default defineConfig(({ command }) => ({
@@ -36,6 +87,13 @@ export default defineConfig(({ command }) => ({
             return
           }
 
+          if (req.url === '/admin') {
+            res.statusCode = 302
+            res.setHeader('Location', '/admin/')
+            res.end()
+            return
+          }
+
           // In dev, strip /restaurant prefix so Vite resolves the SPA at root.
           if (req.url.startsWith('/restaurant/')) {
             req.url = req.url.replace(/^\/restaurant/, '') || '/'
@@ -58,6 +116,10 @@ export default defineConfig(({ command }) => ({
   server: {
     host: true, // Expõe para todos os IPs da rede
     port: 5173,  // Porta padrão (pode mudar se necessário)
+    strictPort: true,
+    warmup: {
+      clientFiles: DEV_WARMUP_CLIENT_FILES,
+    },
     proxy: {
       '/admin': {
         target: 'http://localhost:5174',
@@ -92,6 +154,6 @@ export default defineConfig(({ command }) => ({
   },
   // Optimize dependencies
   optimizeDeps: {
-    include: ['react', 'react-dom', 'zustand', '@supabase/supabase-js', 'lucide-react']
+    include: FIRST_SCREEN_DEPS,
   }
 }))

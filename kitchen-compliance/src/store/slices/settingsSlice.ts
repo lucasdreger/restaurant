@@ -76,6 +76,34 @@ const defaultSettings: AppSettings = {
     activeWakeWords: ['luma'], // Default to "Luma" wake word
 }
 
+function wakeWordsEqual(left: WakeWordId[], right: WakeWordId[]) {
+    if (left === right) return true
+    if (left.length !== right.length) return false
+
+    for (let index = 0; index < left.length; index += 1) {
+        if (left[index] !== right[index]) return false
+    }
+
+    return true
+}
+
+function settingsEqual(left: AppSettings, right: AppSettings) {
+    return (
+        left.restaurantName === right.restaurantName &&
+        left.voiceProvider === right.voiceProvider &&
+        left.audioModel === right.audioModel &&
+        left.ocrProvider === right.ocrProvider &&
+        left.ocrModel === right.ocrModel &&
+        left.apiProvider === right.apiProvider &&
+        left.language === right.language &&
+        left.theme === right.theme &&
+        left.subscriptionTier === right.subscriptionTier &&
+        left.ttsEnabled === right.ttsEnabled &&
+        left.wakeWordEnabled === right.wakeWordEnabled &&
+        wakeWordsEqual(left.activeWakeWords, right.activeWakeWords)
+    )
+}
+
 export interface SettingsSlice {
     settings: AppSettings
     updateSettings: (updates: Partial<AppSettings>) => void
@@ -92,6 +120,10 @@ export const createSettingsSlice: StateCreator<SettingsSlice> = (set) => ({
             // Auto-migrate old default model to the new reliable Whisper model
             if (newSettings.audioModel === 'openai/gpt-audio-mini' as any) {
                 newSettings.audioModel = 'openai/whisper-1'
+            }
+
+            if (settingsEqual(currentSettings, newSettings)) {
+                return state
             }
 
             return { settings: newSettings }

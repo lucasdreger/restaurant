@@ -117,7 +117,6 @@ export class BrowserSpeechService {
 
     // Set up event handlers
     this.recognition.onstart = () => {
-      console.log('[BrowserSpeech] Started listening')
       this.isListening = true
     }
 
@@ -126,8 +125,6 @@ export class BrowserSpeechService {
       const transcript = result[0].transcript
       const confidence = result[0].confidence
       const isFinal = result.isFinal
-
-      console.log('[BrowserSpeech] Result:', { transcript, confidence, isFinal })
 
       this.onResultCallback?.({
         transcript,
@@ -171,7 +168,6 @@ export class BrowserSpeechService {
     }
 
     this.recognition.onend = () => {
-      console.log('[BrowserSpeech] Ended')
       this.isListening = false
       this.onEndCallback?.()
     }

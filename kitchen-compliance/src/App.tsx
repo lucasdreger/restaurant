@@ -1,7 +1,7 @@
 import { useState, useEffect, lazy, Suspense, startTransition } from 'react'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { Toaster } from 'sonner'
-import { useAppStore } from '@/store/useAppStore'
+import { useAppStoreShallow } from '@/store/useAppStore'
 import type { VoiceProvider } from '@/store/useAppStore'
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary'
 import { MainLayout } from '@/components/layout/MainLayout'
@@ -10,20 +10,18 @@ import { AuthProvider } from '@/components/auth/AuthProvider'
 import { useAuth } from '@/components/auth/auth-context'
 import { useCurrentSite } from '@/hooks/queries/useCurrentSite'
 import { useSiteSettings } from '@/hooks/queries/useSiteSettings'
-import { useKiosk } from '@/hooks/useKiosk'
 import { useRealtimeSync, type RealtimeChannelStatus } from '@/hooks/useRealtimeSync'
-import { PinPad } from '@/components/auth/PinPad'
 
-// Direct imports for fast navigation (main app screens)
-import { Dashboard } from '@/components/screens/Dashboard'
-import { HistoryScreen } from '@/components/screens/HistoryScreen'
-import { SettingsScreen } from '@/components/screens/SettingsScreen'
-import { ComplianceScreen } from '@/components/screens/ComplianceScreen'
-import { ReportsScreen } from '@/components/screens/ReportsScreen'
-import { VenuesScreen } from '@/components/screens/VenuesScreen'
-import { MenuEngineeringScreen } from '@/components/menu/MenuEngineeringScreen'
-import { GoodsReceiptScreen } from '@/components/receipt/GoodsReceiptScreen'
-import { ReceiptHistoryScreen } from '@/components/receipt/ReceiptHistoryScreen'
+// Keep the auth/landing shell lean; load the dashboard bundle after auth resolves.
+const Dashboard = lazy(() => import('@/components/screens/Dashboard').then((m) => ({ default: m.Dashboard })))
+const HistoryScreen = lazy(() => import('@/components/screens/HistoryScreen').then((m) => ({ default: m.HistoryScreen })))
+const SettingsScreen = lazy(() => import('@/components/screens/SettingsScreen').then((m) => ({ default: m.SettingsScreen })))
+const ComplianceScreen = lazy(() => import('@/components/screens/ComplianceScreen').then((m) => ({ default: m.ComplianceScreen })))
+const ReportsScreen = lazy(() => import('@/components/screens/ReportsScreen').then((m) => ({ default: m.ReportsScreen })))
+const VenuesScreen = lazy(() => import('@/components/screens/VenuesScreen').then((m) => ({ default: m.VenuesScreen })))
+const MenuEngineeringScreen = lazy(() => import('@/components/menu/MenuEngineeringScreen').then((m) => ({ default: m.MenuEngineeringScreen })))
+const GoodsReceiptScreen = lazy(() => import('@/components/receipt/GoodsReceiptScreen').then((m) => ({ default: m.GoodsReceiptScreen })))
+const ReceiptHistoryScreen = lazy(() => import('@/components/receipt/ReceiptHistoryScreen').then((m) => ({ default: m.ReceiptHistoryScreen })))
 
 // Landing should be immediate (first paint). Keep onboarding lazy.
 import { LandingPage } from '@/components/landing/LandingPage'
@@ -33,6 +31,25 @@ const OnboardingQuestionnaire = lazy(() => import('@/components/onboarding/Onboa
 import { queryClient } from '@/lib/queryClient'
 
 type Screen = 'home' | 'history' | 'settings' | 'compliance' | 'reports' | 'venues' | 'menu_engineering' | 'goods_receipt' | 'receipt_history'
+
+const SCREEN_LOADING_LABELS: Record<Screen, string> = {
+  home: 'Command Center',
+  history: 'Cooling Logs',
+  settings: 'Settings',
+  compliance: 'FSAI Compliance',
+  reports: 'Analytics',
+  venues: 'Venues',
+  menu_engineering: 'Menu Engineering',
+  goods_receipt: 'Goods Receipt',
+  receipt_history: 'Receipt History',
+}
+
+const preloadSecondaryScreens = () =>
+  Promise.allSettled([
+    import('@/components/screens/HistoryScreen'),
+    import('@/components/screens/SettingsScreen'),
+    import('@/components/screens/VenuesScreen'),
+  ])
 
 function RealtimeDebugBanner({
   siteStatus,
@@ -70,13 +87,23 @@ function RealtimeDebugBanner({
 
 function AppContent() {
   const [currentScreen, setCurrentScreen] = useState<Screen>('home')
-  const { currentSite, settings, setCurrentSite, updateSettings, setIsOnline } = useAppStore()
+  const [realtimeEnabled, setRealtimeEnabled] = useState(false)
+  const { currentSite, theme, setCurrentSite, updateSettings, setIsOnline } = useAppStoreShallow((state) => ({
+    currentSite: state.currentSite,
+    theme: state.settings.theme,
+    setCurrentSite: state.setCurrentSite,
+    updateSettings: state.updateSettings,
+    setIsOnline: state.setIsOnline,
+  }))
   const { user, authState, showLanding, setShowLanding, handleDemoStart, handleExitDemo, handleOnboardingComplete } = useAuth()
 
   // Data Loading (React Query)
   const { data: siteData } = useCurrentSite()
   const { data: settingsData } = useSiteSettings(siteData?.id)
-  const realtimeSync = useRealtimeSync({ siteId: siteData?.id ?? currentSite?.id, userId: user?.id })
+  const realtimeSync = useRealtimeSync({
+    siteId: realtimeEnabled ? siteData?.id ?? currentSite?.id : undefined,
+    userId: realtimeEnabled ? user?.id : undefined,
+  })
 
   // Sync Site to Store (Legacy Compatibility)
   useEffect(() => {
@@ -125,13 +152,62 @@ function AppContent() {
 
   // Apply theme class
   useEffect(() => {
-    const themeClass = `theme-${settings.theme}`
+    const themeClass = `theme-${theme}`
     document.documentElement.classList.remove('theme-day', 'theme-night')
     document.documentElement.classList.add(themeClass)
-  }, [settings.theme])
+  }, [theme])
 
-  // Custom hooks
-  const { showPinPad, handlePinSubmit, pinError, pinLoading } = useKiosk(currentSite, authState === 'authenticated' || authState === 'demo')
+  useEffect(() => {
+    if (authState !== 'authenticated' && authState !== 'demo') return
+    if (import.meta.env.DEV) return
+
+    let timeoutId: ReturnType<typeof setTimeout> | null = null
+    let idleId: number | null = null
+
+    const schedulePreload = () => {
+      void preloadSecondaryScreens()
+    }
+
+    if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+      idleId = window.requestIdleCallback(schedulePreload, { timeout: 1500 })
+    } else {
+      timeoutId = setTimeout(schedulePreload, 800)
+    }
+
+    return () => {
+      if (timeoutId != null) clearTimeout(timeoutId)
+      if (idleId != null && typeof window !== 'undefined' && 'cancelIdleCallback' in window) {
+        window.cancelIdleCallback(idleId)
+      }
+    }
+  }, [authState])
+
+  useEffect(() => {
+    if (authState !== 'authenticated' && authState !== 'demo') {
+      setRealtimeEnabled(false)
+      return
+    }
+
+    let timeoutId: ReturnType<typeof setTimeout> | null = null
+    let idleId: number | null = null
+
+    const enableRealtime = () => {
+      setRealtimeEnabled(true)
+    }
+
+    if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+      idleId = window.requestIdleCallback(enableRealtime, { timeout: 2000 })
+    } else {
+      timeoutId = setTimeout(enableRealtime, 1200)
+    }
+
+    return () => {
+      if (timeoutId != null) clearTimeout(timeoutId)
+      if (idleId != null && typeof window !== 'undefined' && 'cancelIdleCallback' in window) {
+        window.cancelIdleCallback(idleId)
+      }
+    }
+  }, [authState])
 
   // Handle navigation with startTransition for smooth updates
   const handleNavigate = (screen: string) => {
@@ -141,7 +217,7 @@ function AppContent() {
   }
 
   // Toast styles based on theme
-  const toastStyle = settings.theme === 'day'
+  const toastStyle = theme === 'day'
     ? {
       background: '#ffffff',
       color: '#1e293b',
@@ -189,40 +265,18 @@ function AppContent() {
   // Wrap content in MainLayout for non-home screens
   const renderScreen = () => {
     if (currentScreen === 'home') {
-      return renderScreenContent()
+      return (
+        <Suspense fallback={<LoadingScreen variant="dashboard" label={currentSite?.name} />}>
+          {renderScreenContent()}
+        </Suspense>
+      )
     }
     return (
       <MainLayout currentScreen={currentScreen} onNavigate={handleNavigate}>
-        {renderScreenContent()}
+        <Suspense fallback={<LoadingScreen variant="screen" label={SCREEN_LOADING_LABELS[currentScreen]} />}>
+          {renderScreenContent()}
+        </Suspense>
       </MainLayout>
-    )
-  }
-
-  // Kiosk PIN Overlay
-  if (showPinPad) {
-    return (
-      <div className="fixed inset-0 z-[100] bg-background/95 backdrop-blur-sm flex flex-col items-center justify-center animate-in fade-in duration-300">
-        <PinPad
-          onSuccess={handlePinSubmit}
-          error={pinError}
-          isLoading={pinLoading}
-          label={currentSite?.name ? `${currentSite.name}` : "Kiosk Locked"}
-        />
-        <div className="mt-8 flex gap-4">
-          {authState === 'demo' && (
-            <button onClick={handleExitDemo} className="text-muted-foreground hover:text-foreground text-sm">
-              Exit Demo
-            </button>
-          )}
-          <button
-            onClick={() => useAppStore.getState().setKioskMode(false)}
-            className="text-muted-foreground hover:text-foreground text-sm"
-          >
-            Exit Kiosk Mode (Dev)
-          </button>
-        </div>
-        {realtimeDebugBanner}
-      </div>
     )
   }
 
@@ -231,7 +285,7 @@ function AppContent() {
   if (authState === 'loading' && user) {
     return (
       <>
-        <LoadingScreen />
+        <LoadingScreen variant="auth" label={currentSite?.name} />
         {realtimeDebugBanner}
       </>
     )
@@ -256,7 +310,7 @@ function AppContent() {
   if (authState === 'onboarding' && user) {
     return (
       <>
-        <Suspense fallback={<LoadingScreen />}>
+        <Suspense fallback={<LoadingScreen variant="onboarding" />}>
           <OnboardingQuestionnaire
             userId={user.id}
             userEmail={user.email || ''}

@@ -24,11 +24,33 @@ export interface VenueSlice {
 
 export const createVenueSlice: StateCreator<VenueSlice> = (set) => ({
     currentSite: null,
-    setCurrentSite: (site) => set({ currentSite: site }),
+    setCurrentSite: (site) =>
+        set((state) => {
+            const currentSite = state.currentSite
+            const unchanged =
+                currentSite?.id === site?.id &&
+                currentSite?.name === site?.name &&
+                currentSite?.address === site?.address &&
+                currentSite?.kiosk_pin === site?.kiosk_pin &&
+                currentSite?.alert_email === site?.alert_email &&
+                currentSite?.alert_phone === site?.alert_phone &&
+                currentSite?.updated_at === site?.updated_at
+
+            return unchanged ? state : { currentSite: site }
+        }),
 
     isDemo: false,
-    setIsDemo: (isDemo) => set({ isDemo }),
+    setIsDemo: (isDemo) => set((state) => (state.isDemo === isDemo ? state : { isDemo })),
 
     venueCache: null,
-    setVenueCache: (venue) => set({ venueCache: venue }),
+    setVenueCache: (venue) =>
+        set((state) => {
+            const current = state.venueCache
+            const unchanged =
+                current?.id === venue?.id &&
+                current?.name === venue?.name &&
+                current?.loadedAt === venue?.loadedAt
+
+            return unchanged ? state : { venueCache: venue }
+        }),
 })

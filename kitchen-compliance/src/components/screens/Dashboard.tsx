@@ -1,41 +1,46 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { lazy, Suspense, useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { Flame, Plus, Snowflake, Soup, Thermometer, TimerReset } from 'lucide-react'
 import { Sidebar, MobileNav } from '@/components/layout/Sidebar'
 import { DashboardHeader, ProgressCard } from '@/components/layout/DashboardHeader'
-import { FridgeTempModal } from '@/components/fridge/FridgeTempModal'
-import {
-  type ActionDialogContext,
-  HaccpStartWorkflowDialog,
-  HaccpWorkflowActionDialog,
-  type ActionPayload,
-  type StartContext,
-  type StartPayload,
+import type {
+  ActionDialogContext,
+  ActionPayload,
+  StartContext,
+  StartPayload,
 } from '@/components/haccp/HaccpWorkflowDialogs'
-import { HaccpOperatorQuickPickDialog } from '@/components/haccp/HaccpOperatorQuickPickDialog'
 import { LegacyHaccpBoard, type LegacyHaccpAction } from '@/components/haccp/LegacyHaccpBoard'
 import {
-  VoiceButton,
-  type VoiceButtonHandle,
-  type VoiceInteractionState,
-} from '@/components/voice/VoiceButton'
-import {
-  useAppStore,
+  useAppStoreShallow,
   getUnacknowledgedAlerts,
   WAKE_WORD_OPTIONS,
 } from '@/store/useAppStore'
 import { useTextToSpeech } from '@/hooks/useVoiceRecognition'
 import { useVoiceFridgeFlow } from '@/hooks/useVoiceFridgeFlow'
 import { useWakeWord, playWakeSound, getPrimaryWakeWordLabel } from '@/hooks/useWakeWord'
-import { getFridges, logFridgeTemp, type Fridge } from '@/services/fridgeService'
+import { logFridgeTemp } from '@/services/fridgeService'
 import { parseVoiceCommand } from '@/lib/voiceCommands'
-import { isWorkflowTemperatureCompliant, shouldShowWorkflowOnBoard } from '@/lib/haccp'
+import { getBoardVisibleWorkflows, isWorkflowTemperatureCompliant } from '@/lib/haccp'
 import { cn } from '@/lib/utils'
 import { isLike } from '@/lib/stringUtils'
 import { useStaff } from '@/hooks/queries/useStaff'
+import { useFridges } from '@/hooks/queries/useFridges'
 import { useHaccpMutations, useHaccpReminders, useHaccpWorkflows } from '@/hooks/queries/useHaccp'
 import { useHaccpVoiceController } from '@/hooks/useHaccpVoiceController'
 import type { HaccpReminder, HaccpWorkflow, VoiceCommand, WorkflowKind, WorkflowState } from '@/types'
 import { toast } from 'sonner'
+import type { VoiceButtonHandle, VoiceInteractionState } from '@/components/voice/VoiceButton'
+
+const FridgeTempModal = lazy(() => import('@/components/fridge/FridgeTempModal').then((m) => ({ default: m.FridgeTempModal })))
+const HaccpStartWorkflowDialog = lazy(() =>
+  import('@/components/haccp/HaccpWorkflowDialogs').then((m) => ({ default: m.HaccpStartWorkflowDialog })),
+)
+const HaccpWorkflowActionDialog = lazy(() =>
+  import('@/components/haccp/HaccpWorkflowDialogs').then((m) => ({ default: m.HaccpWorkflowActionDialog })),
+)
+const HaccpOperatorQuickPickDialog = lazy(() =>
+  import('@/components/haccp/HaccpOperatorQuickPickDialog').then((m) => ({ default: m.HaccpOperatorQuickPickDialog })),
+)
+const VoiceButton = lazy(() => import('@/components/voice/VoiceButton').then((m) => ({ default: m.VoiceButton })))
 
 interface DashboardProps {
   onNavigate?: (screen: string) => void
@@ -72,7 +77,6 @@ export function Dashboard({ onNavigate, currentScreen = 'home' }: DashboardProps
   const [preselectedFridgeIndex, setPreselectedFridgeIndex] = useState<number | undefined>(undefined)
   const [preselectedFridgeTemp, setPreselectedFridgeTemp] = useState<number | null>(null)
   const [preselectedStaffId, setPreselectedStaffId] = useState<string | null>(null)
-  const [fridges, setFridges] = useState<Fridge[]>([])
   const [selectedStaffId, setSelectedStaffId] = useState('')
   const [manualStartDialog, setManualStartDialog] = useState<StartContext | null>(null)
   const [voiceStartDialog, setVoiceStartDialog] = useState<StartContext | null>(null)
@@ -90,10 +94,29 @@ export function Dashboard({ onNavigate, currentScreen = 'home' }: DashboardProps
     state: 'idle',
   })
 
-  const { currentSite, alerts, acknowledgeAlert, settings, activeStaffId } = useAppStore()
+  const {
+    currentSite,
+    alerts,
+    acknowledgeAlert,
+    activeStaffId,
+    voiceProvider,
+    wakeWordEnabled,
+    activeWakeWords,
+    language,
+  } = useAppStoreShallow((state) => ({
+    currentSite: state.currentSite,
+    alerts: state.alerts,
+    acknowledgeAlert: state.acknowledgeAlert,
+    activeStaffId: state.activeStaffId,
+    voiceProvider: state.settings.voiceProvider,
+    wakeWordEnabled: state.settings.wakeWordEnabled,
+    activeWakeWords: state.settings.activeWakeWords,
+    language: state.settings.language,
+  }))
   const { data: workflows = [] } = useHaccpWorkflows(currentSite?.id, DASHBOARD_STATES)
   const { data: reminders = [] } = useHaccpReminders(currentSite?.id)
   const { data: staffMembers = [] } = useStaff(currentSite?.id)
+  const { data: fridges = [] } = useFridges(currentSite?.id)
   const mutations = useHaccpMutations(currentSite?.id)
   const { speak } = useTextToSpeech()
 
@@ -110,9 +133,11 @@ export function Dashboard({ onNavigate, currentScreen = 'home' }: DashboardProps
   })
 
   useEffect(() => {
-    if (!selectedStaffId && staffMembers.length > 0) {
-      setSelectedStaffId(activeStaffId ?? staffMembers[0].id)
-    }
+    if (staffMembers.length === 0) return
+    if (staffMembers.some((staff) => staff.id === selectedStaffId)) return
+
+    const nextStaffId = staffMembers.find((staff) => staff.id === activeStaffId)?.id ?? staffMembers[0].id
+    setSelectedStaffId(nextStaffId)
   }, [activeStaffId, selectedStaffId, staffMembers])
 
   const selectedStaff = useMemo(
@@ -124,7 +149,7 @@ export function Dashboard({ onNavigate, currentScreen = 'home' }: DashboardProps
   const actionDialog = manualActionDialog ?? voiceActionDialog
 
   const visibleWorkflows = useMemo(
-    () => workflows.filter((workflow: HaccpWorkflow) => shouldShowWorkflowOnBoard(workflow, clockNow)),
+    () => getBoardVisibleWorkflows(workflows, clockNow),
     [clockNow, workflows],
   )
 
@@ -189,12 +214,10 @@ export function Dashboard({ onNavigate, currentScreen = 'home' }: DashboardProps
       completionRate,
     }
   }, [visibleWorkflows])
-
-  useEffect(() => {
-    if (currentSite?.id) {
-      getFridges(currentSite.id).then(setFridges).catch(() => setFridges([]))
-    }
-  }, [currentSite?.id])
+  const staffOptions = useMemo(
+    () => staffMembers.map((staff) => ({ id: staff.id, name: staff.name, staff_code: staff.staff_code })),
+    [staffMembers],
+  )
 
   const requestFlowInput = useCallback(() => {
     voiceButtonRef.current?.stopVoice()
@@ -313,7 +336,7 @@ export function Dashboard({ onNavigate, currentScreen = 'home' }: DashboardProps
 
   const scheduleWakeWordResume = useCallback(
     (delayMs = 1200) => {
-      if (!settings.wakeWordEnabled) return
+      if (!wakeWordEnabled) return
 
       if (wakeWordResumeTimeoutRef.current) {
         clearTimeout(wakeWordResumeTimeoutRef.current)
@@ -330,7 +353,7 @@ export function Dashboard({ onNavigate, currentScreen = 'home' }: DashboardProps
         resumeListeningRef.current()
       }, delayMs)
     },
-    [settings.wakeWordEnabled],
+    [wakeWordEnabled],
   )
 
   useEffect(() => {
@@ -346,11 +369,11 @@ export function Dashboard({ onNavigate, currentScreen = 'home' }: DashboardProps
   useEffect(() => {
     const wasFlowInProgress = previousFlowInProgressRef.current
     if (wasFlowInProgress && !isFlowInProgress) {
-      if (settings.voiceProvider === 'realtime') {
+      if (voiceProvider === 'realtime') {
         voiceButtonRef.current?.stopVoice()
       }
 
-      if (settings.wakeWordEnabled) {
+      if (wakeWordEnabled) {
         scheduleWakeWordResume(650)
       }
     }
@@ -359,8 +382,8 @@ export function Dashboard({ onNavigate, currentScreen = 'home' }: DashboardProps
   }, [
     isFlowInProgress,
     scheduleWakeWordResume,
-    settings.voiceProvider,
-    settings.wakeWordEnabled,
+    voiceProvider,
+    wakeWordEnabled,
   ])
 
   useEffect(() => {
@@ -542,10 +565,10 @@ export function Dashboard({ onNavigate, currentScreen = 'home' }: DashboardProps
   )
 
   const handleVoiceEnd = useCallback(() => {
-    if (settings.wakeWordEnabled && !isFlowActive && !isVoiceInteractionBusy) {
+    if (wakeWordEnabled && !isFlowActive && !isVoiceInteractionBusy) {
       resumeListeningRef.current()
     }
-  }, [isFlowActive, isVoiceInteractionBusy, settings.wakeWordEnabled])
+  }, [isFlowActive, isVoiceInteractionBusy, wakeWordEnabled])
 
   const handleVoiceInteractionStateChange = useCallback(
     (state: VoiceInteractionState, detail?: string) => {
@@ -560,12 +583,12 @@ export function Dashboard({ onNavigate, currentScreen = 'home' }: DashboardProps
   const handleWakeWordHeard = useCallback(() => {
     if (isVoiceInteractionBusy) return
     playWakeSound()
-    if (settings.voiceProvider === 'realtime') return
+    if (voiceProvider === 'realtime') return
 
     setTimeout(() => {
       setWakeWordTriggerToken((token) => token + 1)
     }, 400)
-  }, [isVoiceInteractionBusy, settings.voiceProvider])
+  }, [isVoiceInteractionBusy, voiceProvider])
 
   const handleWakeWordDetected = useCallback(() => {
     if (isVoiceInteractionBusy) return
@@ -573,10 +596,10 @@ export function Dashboard({ onNavigate, currentScreen = 'home' }: DashboardProps
       return
     }
 
-    if (settings.voiceProvider === 'realtime') {
+    if (voiceProvider === 'realtime') {
       setWakeWordTriggerToken((token) => token + 1)
     }
-  }, [isVoiceInteractionBusy, settings.voiceProvider])
+  }, [isVoiceInteractionBusy, voiceProvider])
 
   const handleImmediateCommand = useCallback(
     (command: string) => {
@@ -648,12 +671,12 @@ export function Dashboard({ onNavigate, currentScreen = 'home' }: DashboardProps
   )
 
   const activeWakeWordPhrases = useMemo(() => {
-    const activeIds = settings.activeWakeWords || ['luma']
+    const activeIds = activeWakeWords || ['luma']
     return activeIds.flatMap((id) => {
       const option = WAKE_WORD_OPTIONS.find((entry) => entry.id === id)
       return option ? option.phrases : []
     })
-  }, [settings.activeWakeWords])
+  }, [activeWakeWords])
 
   const primaryWakeWordLabel = useMemo(
     () => getPrimaryWakeWordLabel(activeWakeWordPhrases),
@@ -665,11 +688,11 @@ export function Dashboard({ onNavigate, currentScreen = 'home' }: DashboardProps
     onWakeWordDetected: handleWakeWordDetected,
     onCommandDetected: handleImmediateCommand,
     enabled:
-      settings.wakeWordEnabled &&
+      wakeWordEnabled &&
       !isFlowActive &&
       !isVoiceInteractionBusy &&
       !isWakeWordSuppressed,
-    language: settings.language === 'en' ? 'en-IE' : settings.language,
+    language: language === 'en' ? 'en-IE' : language,
     wakeWords: activeWakeWordPhrases,
   })
 
@@ -1081,20 +1104,28 @@ export function Dashboard({ onNavigate, currentScreen = 'home' }: DashboardProps
               </button>
 
               <div className="flex items-center gap-4 px-5 py-4 bg-glass border border-glass rounded-xl shadow-sm">
-                <VoiceButton
-                  ref={voiceButtonRef}
-                  onCommand={handleVoiceCommand}
-                  onTranscript={handleVoiceTranscript}
-                  onInterimTranscript={handleVoiceInterimTranscript}
-                  onEnd={handleVoiceEnd}
-                  onInteractionStateChange={handleVoiceInteractionStateChange}
-                  size="sm"
-                  wakeWordActive={isWakeWordActive}
-                  wakeWordTriggerToken={wakeWordTriggerToken}
-                  wakeWordLabel={primaryWakeWordLabel}
-                  conversationMode={haccpVoice.conversationMode || voiceFridgeFlow.step !== 'idle'}
-                  quickResponseMode={voiceFridgeFlow.isQuickResponseStep}
-                />
+                <Suspense
+                  fallback={
+                    <div className="flex h-10 w-10 items-center justify-center rounded-full border border-theme-primary/60 bg-theme-ghost">
+                      <div className="h-4 w-4 rounded-full border-2 border-theme-muted/30 border-t-theme-muted animate-spin" />
+                    </div>
+                  }
+                >
+                  <VoiceButton
+                    ref={voiceButtonRef}
+                    onCommand={handleVoiceCommand}
+                    onTranscript={handleVoiceTranscript}
+                    onInterimTranscript={handleVoiceInterimTranscript}
+                    onEnd={handleVoiceEnd}
+                    onInteractionStateChange={handleVoiceInteractionStateChange}
+                    size="sm"
+                    wakeWordActive={isWakeWordActive}
+                    wakeWordTriggerToken={wakeWordTriggerToken}
+                    wakeWordLabel={primaryWakeWordLabel}
+                    conversationMode={haccpVoice.conversationMode || voiceFridgeFlow.step !== 'idle'}
+                    quickResponseMode={voiceFridgeFlow.isQuickResponseStep}
+                  />
+                </Suspense>
                 <div className="text-left">
                   <span className="font-semibold text-theme-primary">Voice Commands</span>
                   <p className={cn('text-xs font-medium', voiceStatusTone)}>{voiceStatusSummary}</p>
@@ -1188,82 +1219,98 @@ export function Dashboard({ onNavigate, currentScreen = 'home' }: DashboardProps
 
       <MobileNav currentScreen={currentScreen} onNavigate={handleNavigate} />
 
-      <HaccpStartWorkflowDialog
-        open={!!startDialog}
-        onOpenChange={(open) => {
-          if (open) return
-          setManualStartDialog(null)
-          setVoiceStartDialog(null)
-          if (haccpVoice.conversationMode) {
-            haccpVoice.cancelConversation()
-          }
-        }}
-        context={startDialog}
-        staffOptions={staffMembers.map((staff) => ({ id: staff.id, name: staff.name, staff_code: staff.staff_code }))}
-        defaultStaffId={selectedStaffId || null}
-        loading={
-          mutations.startCooking.isPending ||
-          mutations.startCooling.isPending ||
-          mutations.startReheating.isPending ||
-          mutations.startHotHold.isPending
-        }
-        onSubmit={handleStartSubmit}
-      />
+      {startDialog ? (
+        <Suspense fallback={null}>
+          <HaccpStartWorkflowDialog
+            open={true}
+            onOpenChange={(open) => {
+              if (open) return
+              setManualStartDialog(null)
+              setVoiceStartDialog(null)
+              if (haccpVoice.conversationMode) {
+                haccpVoice.cancelConversation()
+              }
+            }}
+            context={startDialog}
+            staffOptions={staffOptions}
+            defaultStaffId={selectedStaffId || null}
+            loading={
+              mutations.startCooking.isPending ||
+              mutations.startCooling.isPending ||
+              mutations.startReheating.isPending ||
+              mutations.startHotHold.isPending
+            }
+            onSubmit={handleStartSubmit}
+          />
+        </Suspense>
+      ) : null}
 
-      <HaccpWorkflowActionDialog
-        open={!!actionDialog}
-        onOpenChange={(open) => {
-          if (open) return
-          setManualActionDialog(null)
-          setVoiceActionDialog(null)
-          if (haccpVoice.conversationMode) {
-            haccpVoice.cancelConversation()
-          }
-        }}
-        mode={actionDialog?.mode ?? 'complete'}
-        workflow={actionDialog?.workflow ?? null}
-        prefill={actionDialog?.prefill ?? null}
-        staffOptions={staffMembers.map((staff) => ({ id: staff.id, name: staff.name, staff_code: staff.staff_code }))}
-        defaultStaffId={selectedStaffId || null}
-        fridges={fridges}
-        loading={
-          mutations.completeCooking.isPending ||
-          mutations.completeCooling.isPending ||
-          mutations.completeReheating.isPending ||
-          mutations.logHotHoldCheck.isPending ||
-          mutations.stopHotHold.isPending
-        }
-        onSubmit={handleActionSubmit}
-      />
+      {actionDialog ? (
+        <Suspense fallback={null}>
+          <HaccpWorkflowActionDialog
+            open={true}
+            onOpenChange={(open) => {
+              if (open) return
+              setManualActionDialog(null)
+              setVoiceActionDialog(null)
+              if (haccpVoice.conversationMode) {
+                haccpVoice.cancelConversation()
+              }
+            }}
+            mode={actionDialog.mode}
+            workflow={actionDialog.workflow}
+            prefill={actionDialog.prefill ?? null}
+            staffOptions={staffOptions}
+            defaultStaffId={selectedStaffId || null}
+            fridges={fridges}
+            loading={
+              mutations.completeCooking.isPending ||
+              mutations.completeCooling.isPending ||
+              mutations.completeReheating.isPending ||
+              mutations.logHotHoldCheck.isPending ||
+              mutations.stopHotHold.isPending
+            }
+            onSubmit={handleActionSubmit}
+          />
+        </Suspense>
+      ) : null}
 
-      <HaccpOperatorQuickPickDialog
-        open={!!quickOperatorDialog}
-        onOpenChange={(open) => {
-          if (open) return
-          setQuickOperatorDialog(null)
-        }}
-        workflow={quickOperatorDialog?.workflow ?? null}
-        action={quickOperatorDialog?.action ?? 'transition_to_cooling'}
-        staffMembers={staffMembers}
-        loading={
-          mutations.transitionToCooling.isPending ||
-          mutations.startReheating.isPending ||
-          mutations.startHotHold.isPending
-        }
-        onSelect={handleQuickOperatorSelect}
-      />
+      {quickOperatorDialog ? (
+        <Suspense fallback={null}>
+          <HaccpOperatorQuickPickDialog
+            open={true}
+            onOpenChange={(open) => {
+              if (open) return
+              setQuickOperatorDialog(null)
+            }}
+            workflow={quickOperatorDialog.workflow}
+            action={quickOperatorDialog.action}
+            staffMembers={staffMembers}
+            loading={
+              mutations.transitionToCooling.isPending ||
+              mutations.startReheating.isPending ||
+              mutations.startHotHold.isPending
+            }
+            onSelect={handleQuickOperatorSelect}
+          />
+        </Suspense>
+      ) : null}
 
-      <FridgeTempModal
-        isOpen={isFridgeTempModalOpen}
-        onClose={() => {
-          setIsFridgeTempModalOpen(false)
-          voiceFridgeFlow.reset()
-        }}
-        preselectedFridgeIndex={preselectedFridgeIndex}
-        preselectedTemperature={preselectedFridgeTemp}
-        preselectedStaffId={preselectedStaffId}
-        voiceStep={voiceFridgeFlow.step}
-      />
+      {isFridgeTempModalOpen ? (
+        <Suspense fallback={null}>
+          <FridgeTempModal
+            isOpen={true}
+            onClose={() => {
+              setIsFridgeTempModalOpen(false)
+              voiceFridgeFlow.reset()
+            }}
+            preselectedFridgeIndex={preselectedFridgeIndex}
+            preselectedTemperature={preselectedFridgeTemp}
+            preselectedStaffId={preselectedStaffId}
+            voiceStep={voiceFridgeFlow.step}
+          />
+        </Suspense>
+      ) : null}
     </div>
   )
 }

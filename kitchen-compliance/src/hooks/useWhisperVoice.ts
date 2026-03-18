@@ -1,5 +1,5 @@
 import { useCallback, useState, useEffect, useRef } from 'react'
-import { useAppStore } from '@/store/useAppStore'
+import { useAppStoreShallow } from '@/store/useAppStore'
 import { whisperService } from '@/services/whisperService'
 import type { VoiceCommand } from '@/types'
 import { parseVoiceCommand } from '@/lib/voiceCommands'
@@ -15,43 +15,42 @@ interface UseWhisperVoiceOptions {
 export function useWhisperVoice(options: UseWhisperVoiceOptions = {}) {
   const { onCommand, onTranscript, onError, disabled = false, quickResponseMode = false } = options
   const [isConfigured, setIsConfigured] = useState(false)
+  const [isListening, setIsListening] = useState(false)
   const [transcript, setTranscript] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [isProcessing, setIsProcessing] = useState(false)
   const isRecordingRef = useRef(false)
   const autoStopTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
-  const { isListening, setIsListening, settings, currentSite } = useAppStore()
+  const { voiceProvider, language, siteId } = useAppStoreShallow((state) => ({
+    voiceProvider: state.settings.voiceProvider,
+    language: state.settings.language,
+    siteId: state.currentSite?.id,
+  }))
 
   // Initialize whisper service — no API key needed (uses Edge Function)
   useEffect(() => {
-    if (settings.voiceProvider === 'whisper') {
+    if (voiceProvider === 'whisper') {
       whisperService.initialize({
-        language: settings.language || 'en',
-        siteId: currentSite?.id,
+        language: language || 'en',
+        siteId,
       })
       setIsConfigured(true)
-      console.log('[WhisperHook] Initialized (Edge Function)')
     } else {
       setIsConfigured(false)
     }
-  }, [settings.voiceProvider, settings.language, currentSite?.id])
+  }, [language, siteId, voiceProvider])
 
   // Start recording
   const startListening = useCallback(async () => {
-    console.log('[WhisperHook] startListening called')
-    console.log('[WhisperHook] isConfigured:', isConfigured)
-
     if (!isConfigured) {
       const msg = 'Voice provider not configured. Select "Whisper" in Settings.'
-      console.error('[WhisperHook] Not configured:', msg)
       setError(msg)
       onError?.(msg)
       return
     }
 
     if (isListening || isRecordingRef.current) {
-      console.log('[WhisperHook] Already listening, skipping')
       return
     }
 
@@ -61,25 +60,20 @@ export function useWhisperVoice(options: UseWhisperVoiceOptions = {}) {
       isRecordingRef.current = true
       setIsListening(true)
 
-      console.log('[WhisperHook] Starting whisperService.startRecording()...')
       await whisperService.startRecording()
-      console.log('[WhisperHook] Recording started successfully')
 
       // Stop recording when silence is detected
       whisperService.setOnSilenceDetected(() => {
-        console.log('[WhisperHook] Silence auto-stop triggered')
         stopListening()
       }, quickResponseMode)
 
       // Auto-stop limit after 10 seconds for safety (shorter for quick responses)
       const autoStopDelay = quickResponseMode ? 5000 : 10000
       autoStopTimeoutRef.current = setTimeout(() => {
-        console.log(`[WhisperHook] Auto-stopping recording after ${autoStopDelay / 1000}s`)
         stopListening()
       }, autoStopDelay)
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to start recording'
-      console.error('[WhisperHook] Start error:', msg)
       setError(msg)
       onError?.(msg)
       isRecordingRef.current = false
@@ -102,7 +96,6 @@ export function useWhisperVoice(options: UseWhisperVoiceOptions = {}) {
       isRecordingRef.current = false
 
       const text = await whisperService.stopAndTranscribe()
-      console.log('[WhisperHook] Transcription:', text)
 
       setTranscript(text)
       onTranscript?.(text)
@@ -111,15 +104,11 @@ export function useWhisperVoice(options: UseWhisperVoiceOptions = {}) {
         // Only parse commands if not disabled (i.e., not in conversation mode)
         if (!disabled) {
           const command = parseVoiceCommand(text)
-          console.log('[WhisperHook] Parsed command:', command)
           onCommand?.(command)
-        } else {
-          console.log('[WhisperHook] DISABLED - not parsing as command, just transcript:', text)
         }
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Transcription failed'
-      console.error('[WhisperHook] Stop error:', msg)
       setError(msg)
       onError?.(msg)
     } finally {

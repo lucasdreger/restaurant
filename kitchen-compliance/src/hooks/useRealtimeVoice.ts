@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { isSupabaseConfigured, supabase } from '@/lib/supabase'
-import { useAppStore } from '@/store/useAppStore'
+import { useAppStoreShallow } from '@/store/useAppStore'
 
 const DEFAULT_REALTIME_MODEL = 'gpt-4o-realtime-preview-2024-12-17'
 const DEFAULT_INACTIVITY_TIMEOUT_MS = 12000
@@ -65,7 +65,10 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions = {}) {
     keepConnectionAliveMs = 0,
   } = options
 
-  const { settings, currentSite } = useAppStore()
+  const { language, siteId } = useAppStoreShallow((state) => ({
+    language: state.settings.language,
+    siteId: state.currentSite?.id,
+  }))
 
   const [isListening, setIsListening] = useState(false)
   const [transcript, setTranscript] = useState('')
@@ -333,12 +336,12 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions = {}) {
         body: JSON.stringify({
           action: 'realtime_session',
           model: DEFAULT_REALTIME_MODEL,
-          language: settings.language || 'en',
-          site_id: currentSite?.id || null,
+          language: language || 'en',
+          site_id: siteId || null,
         }),
       })
     },
-    [currentSite?.id, settings.language]
+    [language, siteId]
   )
 
   const ensureRealtimeConnection = useCallback(async () => {

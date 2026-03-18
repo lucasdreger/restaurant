@@ -18,7 +18,7 @@ import {
   LayoutDashboard
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { useAppStore } from '@/store/useAppStore'
+import { useAppStoreShallow } from '@/store/useAppStore'
 
 interface SidebarProps {
   currentScreen: string
@@ -49,10 +49,15 @@ const getNavItems = (licenseType: LicenseType) => [
 ]
 
 export function Sidebar({ currentScreen, onNavigate, siteName = 'Kitchen Ops' }: SidebarProps) {
-  const { settings } = useAppStore()
+  const { subscriptionTier } = useAppStoreShallow((state) => ({
+    subscriptionTier: state.settings.subscriptionTier,
+  }))
+  const adminDashboardHref = import.meta.env.DEV
+    ? '/admin/'
+    : `${import.meta.env.BASE_URL.replace(/\/$/, '')}/admin/`
 
   // Get subscription from store settings (synced from DB)
-  const licenseType = (settings.subscriptionTier || 'basic') as LicenseType
+  const licenseType = (subscriptionTier || 'basic') as LicenseType
   const licenseConfig = LICENSE_CONFIG[licenseType]
   const LicenseIcon = licenseConfig.icon
 
@@ -202,7 +207,7 @@ export function Sidebar({ currentScreen, onNavigate, siteName = 'Kitchen Ops' }:
       {/* Admin Link (Dev) */}
       <div className="px-4 pb-2 mt-auto">
         <a
-          href="/admin"
+          href={adminDashboardHref}
           target="_blank"
           rel="noopener noreferrer"
           className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left text-theme-secondary hover:bg-theme-ghost hover:text-theme-primary transition-all duration-150 group"
@@ -272,8 +277,10 @@ export function MobileHeader({
   currentScreen,
   onMenuClick
 }: Omit<SidebarProps, 'onNavigate' | 'siteName'> & { onMenuClick?: () => void }) {
-  const { settings } = useAppStore()
-  const licenseType = (settings.subscriptionTier || 'basic') as LicenseType
+  const { subscriptionTier } = useAppStoreShallow((state) => ({
+    subscriptionTier: state.settings.subscriptionTier,
+  }))
+  const licenseType = (subscriptionTier || 'basic') as LicenseType
   const licenseConfig = LICENSE_CONFIG[licenseType]
   const LicenseIcon = licenseConfig.icon
 
@@ -329,8 +336,10 @@ export function MobileMenuDrawer({
   onNavigate,
   siteName = 'Kitchen Ops'
 }: SidebarProps & { isOpen: boolean; onClose: () => void }) {
-  const { settings } = useAppStore()
-  const licenseType = (settings.subscriptionTier || 'basic') as LicenseType
+  const { subscriptionTier } = useAppStoreShallow((state) => ({
+    subscriptionTier: state.settings.subscriptionTier,
+  }))
+  const licenseType = (subscriptionTier || 'basic') as LicenseType
   const licenseConfig = LICENSE_CONFIG[licenseType]
 
 

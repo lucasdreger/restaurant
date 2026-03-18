@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { ArrowLeft, ClipboardCheck, CheckCircle2, Calendar, Download, TrendingUp, Shield, FileText, Clock, Plus, Thermometer, Users as UsersIcon, Sparkles } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { SchemaRenderer } from '@/components/haccp/schema_renderer/SchemaRenderer'
@@ -8,10 +8,6 @@ import { fsaiStaffTrainingSchema } from '@/components/haccp/schemas/fsai_staff_t
 import type { ComplianceLogData, ComplianceSchema } from '@/components/haccp/types'
 import { saveComplianceLog } from '@/services/complianceService'
 import { useAppStore } from '@/store/useAppStore'
-import { useStaff } from '@/hooks/queries/useStaff'
-import { useCoolingSessions } from '@/hooks/queries/useCooling'
-import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
 import { toast } from 'sonner'
 
 interface ComplianceScreenProps {
@@ -78,87 +74,90 @@ export function ComplianceScreen({ onBack }: ComplianceScreenProps) {
   const [isExporting, setIsExporting] = useState(false)
   const { currentSite } = useAppStore()
 
-  // React Query Hooks (replacing store state)
-  const { data: staffMembers } = useStaff(currentSite?.id)
-  const { data: coolingSessions } = useCoolingSessions(currentSite?.id)
-
-  useEffect(() => {
-    if (staffMembers) console.log('Staff loaded:', staffMembers.length)
-    if (coolingSessions) console.log('Cooling sessions loaded:', coolingSessions.length)
-  }, [staffMembers, coolingSessions])
-
   const handleOpenSchema = (schema: ComplianceSchema) => {
     setActiveSchema(schema);
     setShowLogForm(true);
   }
 
-  const handleExportPDF = () => {
+  const handleExportPDF = async () => {
     setIsExporting(true);
-    const doc = new jsPDF();
 
-    // Header
-    doc.setFontSize(22);
-    doc.setTextColor(40, 40, 40);
-    doc.text("Kitchen Compliance Report", 14, 20);
+    try {
+      const [{ default: jsPDF }, { default: autoTable }] = await Promise.all([
+        import('jspdf'),
+        import('jspdf-autotable'),
+      ])
 
-    doc.setFontSize(12);
-    doc.setTextColor(100, 100, 100);
-    doc.text(`Generated on: ${new Date().toLocaleDateString()}`, 14, 30);
-    doc.text(`Location: Dublin City Centre Branch`, 14, 36);
+      const doc = new jsPDF();
 
-    // Summary Section
-    doc.setDrawColor(200, 200, 200);
-    doc.line(14, 45, 196, 45);
+      // Header
+      doc.setFontSize(22);
+      doc.setTextColor(40, 40, 40);
+      doc.text("Kitchen Compliance Report", 14, 20);
 
-    doc.setFontSize(14);
-    doc.setTextColor(0, 0, 0);
-    doc.text("Compliance Summary", 14, 55);
+      doc.setFontSize(12);
+      doc.setTextColor(100, 100, 100);
+      doc.text(`Generated on: ${new Date().toLocaleDateString()}`, 14, 30);
+      doc.text(`Location: Dublin City Centre Branch`, 14, 36);
 
-    autoTable(doc, {
-      startY: 60,
-      head: [['Metric', 'Score', 'Status']],
-      body: [
-        ['Overall Score', '96%', 'Excellent'],
-        ['Cooling Compliance', '98%', 'Passing'],
-        ['Temp. Checks', '94%', 'Passing'],
-        ['Documentation', '97%', 'Passing'],
-      ],
-      theme: 'grid',
-      headStyles: { fillColor: [66, 66, 66] },
-    });
+      // Summary Section
+      doc.setDrawColor(200, 200, 200);
+      doc.line(14, 45, 196, 45);
 
-    // Recent Audits Section (using mock data from component)
-    const finalY = (doc as any).lastAutoTable.finalY || 60;
+      doc.setFontSize(14);
+      doc.setTextColor(0, 0, 0);
+      doc.text("Compliance Summary", 14, 55);
 
-    doc.text("Recent Audit Logs", 14, finalY + 15);
+      autoTable(doc, {
+        startY: 60,
+        head: [['Metric', 'Score', 'Status']],
+        body: [
+          ['Overall Score', '96%', 'Excellent'],
+          ['Cooling Compliance', '98%', 'Passing'],
+          ['Temp. Checks', '94%', 'Passing'],
+          ['Documentation', '97%', 'Passing'],
+        ],
+        theme: 'grid',
+        headStyles: { fillColor: [66, 66, 66] },
+      });
 
-    autoTable(doc, {
-      startY: finalY + 20,
-      head: [['Date', 'Type', 'Score', 'Status', 'Findings']],
-      body: recentAudits.map(audit => [
-        audit.date,
-        audit.type,
-        `${audit.score}%`,
-        audit.status.toUpperCase(),
-        audit.findings.toString()
-      ]),
-      theme: 'striped',
-      headStyles: { fillColor: [41, 128, 185] },
-    });
+      // Recent Audits Section (using mock data from component)
+      const finalY = (doc as any).lastAutoTable.finalY || 60;
 
-    // Footer
-    const pageCount = (doc as any).internal.getNumberOfPages();
-    for (let i = 1; i <= pageCount; i++) {
-      doc.setPage(i);
-      doc.setFontSize(10);
-      doc.setTextColor(150);
-      doc.text('Kitchen Ops - Official FSAI Compliance Record', 14, 285);
-      doc.text(`Page ${i} of ${pageCount}`, 190, 285, { align: 'right' });
+      doc.text("Recent Audit Logs", 14, finalY + 15);
+
+      autoTable(doc, {
+        startY: finalY + 20,
+        head: [['Date', 'Type', 'Score', 'Status', 'Findings']],
+        body: recentAudits.map(audit => [
+          audit.date,
+          audit.type,
+          `${audit.score}%`,
+          audit.status.toUpperCase(),
+          audit.findings.toString()
+        ]),
+        theme: 'striped',
+        headStyles: { fillColor: [41, 128, 185] },
+      });
+
+      // Footer
+      const pageCount = (doc as any).internal.getNumberOfPages();
+      for (let i = 1; i <= pageCount; i++) {
+        doc.setPage(i);
+        doc.setFontSize(10);
+        doc.setTextColor(150);
+        doc.text('Kitchen Ops - Official FSAI Compliance Record', 14, 285);
+        doc.text(`Page ${i} of ${pageCount}`, 190, 285, { align: 'right' });
+      }
+
+      doc.save(`compliance-report-${new Date().toISOString().split('T')[0]}.pdf`);
+      toast.success('Report downloaded successfully');
+    } catch (error) {
+      console.error('Failed to export compliance report', error)
+      toast.error('Failed to generate compliance report')
+    } finally {
+      setIsExporting(false);
     }
-
-    doc.save(`compliance-report-${new Date().toISOString().split('T')[0]}.pdf`);
-    setIsExporting(false);
-    toast.success('Report downloaded successfully');
   }
 
   const handleLogSave = async (data: ComplianceLogData) => {

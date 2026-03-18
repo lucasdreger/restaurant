@@ -21,17 +21,35 @@ export interface UiSlice {
 export const createUiSlice: StateCreator<UiSlice> = (set) => ({
     // Connection status
     isOnline: typeof navigator !== 'undefined' ? navigator.onLine : true,
-    setIsOnline: (online) => set({ isOnline: online }),
+    setIsOnline: (online) => set((state) => (state.isOnline === online ? state : { isOnline: online })),
 
     // Voice state
     isListening: false,
-    setIsListening: (listening) => set({ isListening: listening }),
+    setIsListening: (listening) => set((state) => (state.isListening === listening ? state : { isListening: listening })),
 
     // Kiosk state
-    kioskMode: true,
-    setKioskMode: (kiosk) => set({ kioskMode: kiosk }),
-    kioskLocked: true, // Default to locked
+    kioskMode: false,
+    setKioskMode: (kiosk) =>
+        set((state) => {
+            if (!kiosk) {
+                if (!state.kioskMode && !state.kioskLocked && state.activeStaffId === null) return state
+                return { kioskMode: false, kioskLocked: false, activeStaffId: null }
+            }
+
+            return state.kioskMode ? state : { kioskMode: true }
+        }),
+    kioskLocked: false,
     activeStaffId: null,
-    lockKiosk: () => set({ kioskLocked: true, activeStaffId: null }),
-    unlockKiosk: (staffId) => set({ kioskLocked: false, activeStaffId: staffId }),
+    lockKiosk: () =>
+        set((state) => (
+            state.kioskLocked && state.activeStaffId === null
+                ? state
+                : { kioskLocked: true, activeStaffId: null }
+        )),
+    unlockKiosk: (staffId) =>
+        set((state) => (
+            !state.kioskLocked && state.activeStaffId === staffId
+                ? state
+                : { kioskLocked: false, activeStaffId: staffId }
+        )),
 })

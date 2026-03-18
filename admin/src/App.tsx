@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom'
+import { BrowserRouter, HashRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { supabase } from '@/lib/supabase'
 import { AuthPage } from '@/components/auth/AuthPage'
 import { AdminLayout } from '@/components/layouts/AdminLayout'
@@ -11,6 +11,7 @@ import { Toaster } from 'sonner'
 function App() {
   const [session, setSession] = useState<Session | null>(null)
   const [loading, setLoading] = useState(true)
+  const Router = import.meta.env.PROD ? HashRouter : BrowserRouter
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {

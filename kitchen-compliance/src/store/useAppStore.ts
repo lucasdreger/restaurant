@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
+import { useShallow } from 'zustand/react/shallow'
 import type { CoolingSession, Alert, FoodItemPreset } from '@/types'
 
 // Import Slices
@@ -26,6 +27,17 @@ export const useAppStore = create<AppState>()(
     }),
     {
       name: 'kitchen-compliance-storage',
+      merge: (persistedState, currentState) => {
+        const state = (persistedState ?? {}) as Partial<AppState>
+
+        return {
+          ...currentState,
+          ...state,
+          kioskMode: false,
+          kioskLocked: false,
+          activeStaffId: null,
+        }
+      },
       partialize: (state) => ({
         // Venue Slice
         currentSite: state.currentSite,
@@ -37,17 +49,16 @@ export const useAppStore = create<AppState>()(
         foodPresets: state.foodPresets,
         offlineQueue: state.offlineQueue,
 
-        // UI Slice
-        kioskMode: state.kioskMode,
-        activeStaffId: state.activeStaffId,
-        // Don't persist kioskLocked - always start locked on refresh for security
-
         // Settings Slice
         settings: state.settings,
       }),
     }
   )
 )
+
+export function useAppStoreShallow<T>(selector: (state: AppState) => T) {
+  return useAppStore(useShallow(selector))
+}
 
 // Simple getters (not hooks) for derived data
 // Only include sessions that are NOT closed (no closed_at timestamp)

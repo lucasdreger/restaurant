@@ -1,7 +1,9 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { Thermometer, Plus, ShieldCheck, Check, Edit2, Trash2, X } from 'lucide-react'
-import { useAppStore } from '@/store/useAppStore'
-import { getFridges, createFridge, updateFridge, deleteFridge, FRIDGE_LIMITS, type Fridge } from '@/services/fridgeService'
+import { useQueryClient } from '@tanstack/react-query'
+import { useAppStoreShallow } from '@/store/useAppStore'
+import { FRIDGE_KEYS, useFridges } from '@/hooks/queries/useFridges'
+import { createFridge, updateFridge, deleteFridge, FRIDGE_LIMITS, type Fridge } from '@/services/fridgeService'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 
@@ -10,36 +12,24 @@ interface FridgeSettingsProps {
 }
 
 export function FridgeSettings({ onPlanUpgrade }: FridgeSettingsProps) {
-    const { currentSite, settings } = useAppStore()
-
-    const [fridgeList, setFridgeList] = useState<Fridge[]>([])
-    const [loading, setLoading] = useState(false)
+    const queryClient = useQueryClient()
+    const { currentSite, subscriptionTier } = useAppStoreShallow((state) => ({
+        currentSite: state.currentSite,
+        subscriptionTier: state.settings.subscriptionTier,
+    }))
+    const { data: fridgeList = [], isLoading: loading } = useFridges(currentSite?.id)
 
     const [newFridgeName, setNewFridgeName] = useState('')
 
     const [editingFridgeId, setEditingFridgeId] = useState<string | null>(null)
     const [editingFridgeName, setEditingFridgeName] = useState('')
 
-    useEffect(() => {
-        if (currentSite?.id) {
-            loadFridges()
-        }
-    }, [currentSite?.id])
-
-    const loadFridges = async () => {
+    const refreshFridges = async () => {
         if (!currentSite?.id) return
-        setLoading(true)
-        try {
-            const data = await getFridges(currentSite.id)
-            setFridgeList(data)
-        } catch (error) {
-            console.error('Failed to load fridges:', error)
-        } finally {
-            setLoading(false)
-        }
+        await queryClient.invalidateQueries({ queryKey: FRIDGE_KEYS.list(currentSite.id) })
     }
 
-    const fridgeLimit = settings.subscriptionTier ? FRIDGE_LIMITS[settings.subscriptionTier] : FRIDGE_LIMITS.basic
+    const fridgeLimit = subscriptionTier ? FRIDGE_LIMITS[subscriptionTier] : FRIDGE_LIMITS.basic
     const canAddMoreFridges = fridgeList.length < fridgeLimit
 
     const handleAddFridge = async () => {
@@ -57,7 +47,7 @@ export function FridgeSettings({ onPlanUpgrade }: FridgeSettingsProps) {
             await createFridge(currentSite.id, newFridgeName.trim())
             toast.success('Fridge added')
             setNewFridgeName('')
-            loadFridges()
+            await refreshFridges()
         } catch (error) {
             console.error('Failed to add fridge:', error)
             toast.error('Failed to add fridge')
@@ -69,7 +59,7 @@ export function FridgeSettings({ onPlanUpgrade }: FridgeSettingsProps) {
         try {
             await deleteFridge(id)
             toast.success('Fridge removed')
-            loadFridges()
+            await refreshFridges()
         } catch (error) {
             console.error('Failed to delete fridge:', error)
             toast.error('Failed to remove fridge')
@@ -88,7 +78,7 @@ export function FridgeSettings({ onPlanUpgrade }: FridgeSettingsProps) {
             await updateFridge(id, { name: editingFridgeName.trim() })
             toast.success('Fridge name updated')
             setEditingFridgeId(null)
-            loadFridges()
+            await refreshFridges()
         } catch (error) {
             console.error('Failed to update fridge:', error)
             toast.error('Failed to update fridge name')
@@ -109,11 +99,11 @@ export function FridgeSettings({ onPlanUpgrade }: FridgeSettingsProps) {
                                 {fridgeList.length} / {fridgeLimit === Infinity ? '∞' : fridgeLimit} fridges
                                 <span className={cn(
                                     "ml-2 inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.12em]",
-                                    settings.subscriptionTier === 'basic' ? "border-zinc-300 bg-zinc-100 text-zinc-700" :
-                                        settings.subscriptionTier === 'pro' ? "border-purple-200 bg-purple-100 text-purple-700" :
+                                    subscriptionTier === 'basic' ? "border-zinc-300 bg-zinc-100 text-zinc-700" :
+                                        subscriptionTier === 'pro' ? "border-purple-200 bg-purple-100 text-purple-700" :
                                             "border-amber-200 bg-amber-100 text-amber-700"
                                 )}>
-                                    {settings.subscriptionTier || 'basic'}
+                                    {subscriptionTier || 'basic'}
                                 </span>
                             </p>
                         </div>
@@ -231,7 +221,7 @@ export function FridgeSettings({ onPlanUpgrade }: FridgeSettingsProps) {
                 </div>
 
                 {/* Subscription Upgrade Hint */}
-                {settings.subscriptionTier === 'basic' && (
+                {subscriptionTier === 'basic' && (
                     <div className="mt-6 p-4 rounded-xl bg-gradient-to-r from-purple-500/10 to-cyan-500/10 border border-purple-500/20">
                         <p className="mb-1 text-sm font-semibold text-purple-700">
                             Need more fridges?

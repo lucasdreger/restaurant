@@ -1,11 +1,16 @@
 import { useState, useEffect } from 'react'
-import { useAppStore } from '@/store/useAppStore'
+import { useAppStoreShallow } from '@/store/useAppStore'
 import { verifyPin } from '@/services/staffService'
 import { toast } from 'sonner'
 import type { Site } from '@/types'
 
 export function useKiosk(currentSite: Site | null, isAuth: boolean) {
-    const { kioskMode, kioskLocked, lockKiosk, unlockKiosk } = useAppStore()
+    const { kioskMode, kioskLocked, lockKiosk, unlockKiosk } = useAppStoreShallow((state) => ({
+        kioskMode: state.kioskMode,
+        kioskLocked: state.kioskLocked,
+        lockKiosk: state.lockKiosk,
+        unlockKiosk: state.unlockKiosk,
+    }))
     const [pinError, setPinError] = useState<string | null>(null)
     const [pinLoading, setPinLoading] = useState(false)
 

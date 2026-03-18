@@ -51,31 +51,32 @@ export function useCurrentSite() {
                     if (venue) return mapVenueToSite(venue)
                 }
 
-                // 3. Fallback: Owned venue
-                const { data: ownedVenue } = await (supabase
-                    .from('venues') as any)
-                    .select('*')
-                    .eq('created_by', user.id)
-                    .limit(1)
-                    .single()
+                // 3. Fallbacks: owned venue and member venue lookup can run in parallel.
+                const [ownedVenueResult, memberDataResult] = await Promise.all([
+                    (supabase
+                        .from('venues') as any)
+                        .select('*')
+                        .eq('created_by', user.id)
+                        .limit(1)
+                        .maybeSingle(),
+                    (supabase
+                        .from('venue_members') as any)
+                        .select('venue_id')
+                        .eq('user_id', user.id)
+                        .limit(1)
+                        .maybeSingle(),
+                ])
 
-                if (ownedVenue) return mapVenueToSite(ownedVenue)
+                if (ownedVenueResult.data) {
+                    return mapVenueToSite(ownedVenueResult.data)
+                }
 
-                // 4. Fallback: Member venue
-                // Avoid relational embed here to prevent PostgREST relation-name drift issues.
-                const { data: memberData } = await (supabase
-                    .from('venue_members') as any)
-                    .select('venue_id')
-                    .eq('user_id', user.id)
-                    .limit(1)
-                    .single()
-
-                if (memberData?.venue_id) {
+                if (memberDataResult.data?.venue_id) {
                     const { data: memberVenue } = await (supabase
                         .from('venues') as any)
                         .select('*')
-                        .eq('id', memberData.venue_id)
-                        .single()
+                        .eq('id', memberDataResult.data.venue_id)
+                        .maybeSingle()
 
                     if (memberVenue) return mapVenueToSite(memberVenue)
                 }

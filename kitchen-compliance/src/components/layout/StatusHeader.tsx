@@ -1,5 +1,5 @@
 import { Wifi, WifiOff, Clock, AlertTriangle, CheckCircle, Settings } from 'lucide-react'
-import { useAppStore, getActiveSessions, getOverdueSessions } from '@/store/useAppStore'
+import { useAppStoreShallow, getActiveSessions, getOverdueSessions } from '@/store/useAppStore'
 import { useCoolingSessions } from '@/hooks/queries/useCooling'
 import { cn } from '@/lib/utils'
 import { useEffect, useState, useMemo } from 'react'
@@ -9,7 +9,11 @@ interface StatusHeaderProps {
 }
 
 export function StatusHeader({ onSettingsClick }: StatusHeaderProps) {
-  const { isOnline, currentSite, settings } = useAppStore()
+  const { isOnline, currentSite, restaurantName } = useAppStoreShallow((state) => ({
+    isOnline: state.isOnline,
+    currentSite: state.currentSite,
+    restaurantName: state.settings.restaurantName,
+  }))
   const { data: coolingSessions = [] } = useCoolingSessions(currentSite?.id)
   const [currentTime, setCurrentTime] = useState(new Date())
 
@@ -42,7 +46,7 @@ export function StatusHeader({ onSettingsClick }: StatusHeaderProps) {
               <CheckCircle className="w-5 h-5 text-green-400" />
             )}
             <span className="font-bold text-lg">
-              {settings.restaurantName || currentSite?.name || 'Kitchen'}
+              {restaurantName || currentSite?.name || 'Kitchen'}
             </span>
           </div>
         </div>

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   addMinutesIso,
+  getBoardVisibleWorkflows,
   getHotHoldReminderAlert,
   getHotHoldSeverity,
   getWorkflowStateFromTemperature,
@@ -94,5 +95,45 @@ describe('HACCP rules', () => {
         new Date('2026-03-13T10:51:00.000Z').getTime(),
       ),
     ).toBe(false)
+  })
+
+  it('hides a completed cook workflow once a downstream cooling step exists', () => {
+    const workflows = getBoardVisibleWorkflows(
+      [
+        {
+          id: 'cook-1',
+          batch_id: 'batch-1',
+          site_id: 'site-1',
+          workflow_kind: 'cooking',
+          state: 'completed',
+          title: 'Cook tomato sauce',
+          item_name: 'Tomato Sauce',
+          item_category: 'sauce',
+          started_at: '2026-03-13T10:00:00.000Z',
+          completed_at: '2026-03-13T10:20:00.000Z',
+          location_kind: 'kitchen',
+          location_label: 'Kitchen',
+          created_at: '2026-03-13T10:00:00.000Z',
+        },
+        {
+          id: 'cool-1',
+          batch_id: 'batch-1',
+          site_id: 'site-1',
+          workflow_kind: 'cooling',
+          state: 'active',
+          parent_workflow_id: 'cook-1',
+          title: 'Cool tomato sauce',
+          item_name: 'Tomato Sauce',
+          item_category: 'sauce',
+          started_at: '2026-03-13T10:21:00.000Z',
+          location_kind: 'kitchen',
+          location_label: 'Kitchen',
+          created_at: '2026-03-13T10:21:00.000Z',
+        },
+      ],
+      new Date('2026-03-13T10:25:00.000Z').getTime(),
+    )
+
+    expect(workflows.map((workflow) => workflow.id)).toEqual(['cool-1'])
   })
 })

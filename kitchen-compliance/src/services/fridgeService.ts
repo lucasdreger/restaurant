@@ -149,8 +149,6 @@ export async function deleteFridge(fridgeId: string): Promise<void> {
 
 // Log a temperature reading
 export async function logFridgeTemp(log: CreateFridgeTempLog): Promise<FridgeTempLog> {
-  console.log('[logFridgeTemp] Insert Payload:', log);
-  
   if (!isSupabaseConfigured()) {
     // Demo mode - return mock log
     return {
@@ -173,8 +171,8 @@ export async function logFridgeTemp(log: CreateFridgeTempLog): Promise<FridgeTem
     .single()
 
   if (error) {
-    console.error('[logFridgeTemp] Insert Error:', error);
-    throw error;
+    console.error('[logFridgeTemp] Insert Error:', error)
+    throw error
   }
   return data
 }

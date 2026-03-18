@@ -29,11 +29,6 @@ import {
   type GoodsReceipt,
   getGoodsReceiptWithDetails,
 } from '@/services/deliveryService'
-import {
-  generateGoodsReceiptReport,
-  generateSummaryReport,
-  downloadPdfReport,
-} from '@/services/pdfReportService'
 import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/Badge'
 import { Input } from '@/components/ui/Input'
@@ -79,6 +74,8 @@ const STATUS_MAP: Record<ReceiptStatus, { icon: React.ReactNode; color: string; 
   flagged: { icon: <AlertTriangle className="h-4 w-4" />, color: 'bg-red-500/10 text-red-600', label: 'Flagged' },
   voided: { icon: <XCircle className="h-4 w-4" />, color: 'bg-gray-500/10 text-gray-600', label: 'Voided' },
 }
+
+const loadPdfReportService = () => import('@/services/pdfReportService')
 
 // --- Components ---
 
@@ -267,6 +264,7 @@ function ReceiptDetailModal({ receipt, onClose }: ReceiptDetailModalProps) {
 
     try {
       toast.loading('Generating receipt PDF...')
+      const { generateGoodsReceiptReport, downloadPdfReport } = await loadPdfReportService()
       const blob = await generateGoodsReceiptReport(
         [{ ...receipt, items: items as any[], images }],
         {
@@ -438,6 +436,12 @@ function ReportDialog({ isOpen, onClose, receipts, filters }: ReportDialogProps)
       }
 
       let blob: Blob
+      const {
+        generateGoodsReceiptReport,
+        generateSummaryReport,
+        downloadPdfReport,
+      } = await loadPdfReportService()
+
       if (reportType === 'summary') {
         blob = generateSummaryReport(receiptsWithDetails as any, options)
       } else {

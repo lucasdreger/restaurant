@@ -1,8 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { supabase, isSupabaseConfigured, DEMO_SITE_ID } from '@/lib/supabase'
-import { clearKitchenComplianceAppStorage } from '@/lib/appStorage'
 import type { User, Session } from '@supabase/supabase-js'
-import { useAppStore } from '@/store/useAppStore'
+import { useAppStore, useAppStoreShallow } from '@/store/useAppStore'
 import type { VoiceProvider } from '@/store/useAppStore'
 import { getSiteSettings } from '@/services/settingsService'
 import { AuthContext } from './auth-context'
@@ -18,12 +17,64 @@ const FALLBACK_DEMO_SITE = {
     updated_at: new Date().toISOString(),
 }
 
+const AUTH_BOOTSTRAP_CACHE_KEY = 'kitchen-compliance-auth-bootstrap'
+const AUTH_BOOTSTRAP_CACHE_TTL_MS = 1000 * 60 * 60 * 12
+
+type CachedAuthBootstrap = {
+    userId: string
+    onboardingCompleted: boolean
+    checkedAt: number
+}
+
+function readCachedAuthBootstrap(userId: string): CachedAuthBootstrap | null {
+    try {
+        const raw = localStorage.getItem(AUTH_BOOTSTRAP_CACHE_KEY)
+        if (!raw) return null
+
+        const parsed = JSON.parse(raw) as CachedAuthBootstrap
+        if (parsed.userId !== userId) return null
+        if (Date.now() - parsed.checkedAt > AUTH_BOOTSTRAP_CACHE_TTL_MS) return null
+
+        return parsed
+    } catch {
+        return null
+    }
+}
+
+function writeCachedAuthBootstrap(userId: string, onboardingCompleted: boolean) {
+    try {
+        localStorage.setItem(
+            AUTH_BOOTSTRAP_CACHE_KEY,
+            JSON.stringify({
+                userId,
+                onboardingCompleted,
+                checkedAt: Date.now(),
+            } satisfies CachedAuthBootstrap),
+        )
+    } catch {
+        // ignore cache write failures
+    }
+}
+
+function clearCachedAuthBootstrap() {
+    try {
+        localStorage.removeItem(AUTH_BOOTSTRAP_CACHE_KEY)
+    } catch {
+        // ignore cache clear failures
+    }
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
     const [authState, setAuthState] = useState<AuthState>('loading')
     const [user, setUser] = useState<User | null>(null)
     const [showLanding, setShowLanding] = useState(true)
 
-    const { isDemo, setIsDemo, setCurrentSite, settings } = useAppStore()
+    const { isDemo, setIsDemo, setCurrentSite, settings } = useAppStoreShallow((state) => ({
+        isDemo: state.isDemo,
+        setIsDemo: state.setIsDemo,
+        setCurrentSite: state.setCurrentSite,
+        settings: state.settings,
+    }))
 
     // Sync authState to ref for usage in effects
     const authStateRef = useRef(authState)
@@ -35,6 +86,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     // Handle onboarding complete
     const handleOnboardingComplete = () => {
+        if (user?.id) {
+            writeCachedAuthBootstrap(user.id, true)
+        }
         setAuthState('authenticated')
         setShowLanding(false)
     }
@@ -114,6 +168,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setAuthState('unauthenticated')
         setCurrentSite(null)
         setShowLanding(true)
+        clearCachedAuthBootstrap()
     }
 
     // Main authentication effect - runs once on mount
@@ -143,8 +198,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // Track if auth check has started
         let profileCheckInProgress = false
 
+        const applyResolvedAuthState = (nextState: Extract<AuthState, 'authenticated' | 'onboarding'>) => {
+            setAuthState(nextState)
+            setShowLanding(false)
+        }
+
         // Function to check profile and determine auth state
-        const checkProfileAndSetState = async (session: Session) => {
+        const checkProfileAndSetState = async (
+            session: Session,
+            fallbackState?: Extract<AuthState, 'authenticated' | 'onboarding'>,
+        ) => {
             // Prevent duplicate calls
             if (profileCheckInProgress) {
                 console.log('⏳ Profile check already in progress, skipping duplicate call')
@@ -173,10 +236,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 const raced = await Promise.race([profilePromise, timeoutPromise])
 
                 if (raced.kind === 'timeout') {
-                    console.warn(`⚠️ Profile check timed out after ${PROFILE_CHECK_TIMEOUT_MS}ms, continuing as authenticated`)
-                    setAuthState('authenticated')
-                    setShowLanding(false)
-                    useAppStore.getState().unlockKiosk(session.user.id)
+                    console.warn(`⚠️ Profile check timed out after ${PROFILE_CHECK_TIMEOUT_MS}ms`)
+                    if (!fallbackState) {
+                        applyResolvedAuthState('authenticated')
+                    }
                     return
                 }
 
@@ -187,24 +250,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
                 if (error) {
                     console.error('Profile query error:', error)
-                    // On error, show onboarding to be safe
-                    setAuthState('onboarding')
+                    if (!fallbackState) {
+                        applyResolvedAuthState('onboarding')
+                    }
                 } else if (!profile || !profile.onboarding_completed) {
                     console.log('⚠️ Onboarding incomplete or profile missing')
-                    // New company → questionnaire
-                    setAuthState('onboarding')
+                    writeCachedAuthBootstrap(session.user.id, false)
+                    applyResolvedAuthState('onboarding')
                 } else {
                     console.log('✅ Profile verified - routing to Dashboard')
-                    // Existing company → dashboard
-                    setAuthState('authenticated')
-                    // Unlock Kiosk Mode for the authenticated user (Manager/Owner)
-                    useAppStore.getState().unlockKiosk(session.user.id)
+                    writeCachedAuthBootstrap(session.user.id, true)
+                    applyResolvedAuthState('authenticated')
                 }
-                setShowLanding(false)
             } catch (err) {
                 console.error('Profile check error:', err)
-                setAuthState('onboarding')
-                setShowLanding(false)
+                if (!fallbackState) {
+                    applyResolvedAuthState('onboarding')
+                }
                 currentAuthUserRef.current = null // Clear ref on error
             } finally {
                 profileCheckInProgress = false
@@ -221,11 +283,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 sessionStorage.removeItem('manual_logout')
                 await supabase.auth.signOut().catch(console.error)
                 // Clear only app state; do NOT clear all localStorage.
+                const { clearKitchenComplianceAppStorage } = await import('@/lib/appStorage')
                 clearKitchenComplianceAppStorage()
 
                 setUser(null)
                 setAuthState('unauthenticated')
                 setShowLanding(true)
+                clearCachedAuthBootstrap()
                 currentAuthUserRef.current = null
                 return
             }
@@ -245,14 +309,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                         return
                     }
                     setUser(session.user)
-                    await checkProfileAndSetState(session)
+                    const cachedBootstrap = readCachedAuthBootstrap(session.user.id)
+
+                    if (cachedBootstrap) {
+                        applyResolvedAuthState(
+                            cachedBootstrap.onboardingCompleted ? 'authenticated' : 'onboarding',
+                        )
+                        void checkProfileAndSetState(
+                            session,
+                            cachedBootstrap.onboardingCompleted ? 'authenticated' : 'onboarding',
+                        )
+                    } else {
+                        await checkProfileAndSetState(session)
+                    }
                 } else {
                     setAuthState('unauthenticated')
+                    setShowLanding(true)
+                    clearCachedAuthBootstrap()
                     currentAuthUserRef.current = null
                 }
             } catch (err) {
                 console.error('Auth init error:', err)
                 setAuthState('unauthenticated')
+                setShowLanding(true)
+                clearCachedAuthBootstrap()
                 currentAuthUserRef.current = null
             }
         }
@@ -288,11 +368,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                     }
 
                     setUser(session.user)
-                    await checkProfileAndSetState(session)
+                    const cachedBootstrap = readCachedAuthBootstrap(session.user.id)
+
+                    if (cachedBootstrap) {
+                        applyResolvedAuthState(
+                            cachedBootstrap.onboardingCompleted ? 'authenticated' : 'onboarding',
+                        )
+                        void checkProfileAndSetState(
+                            session,
+                            cachedBootstrap.onboardingCompleted ? 'authenticated' : 'onboarding',
+                        )
+                    } else {
+                        await checkProfileAndSetState(session)
+                    }
                 } else if (event === 'SIGNED_OUT') {
                     setUser(null)
                     setAuthState('unauthenticated')
                     setShowLanding(true)
+                    clearCachedAuthBootstrap()
                     currentAuthUserRef.current = null
                 } else if (event === 'TOKEN_REFRESHED' && session?.user) {
                     setUser(session.user)

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useCallback } from 'react'
 import { X, Bell, BellOff, ChevronRight, Clock, AlertTriangle, Check } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { useAppStore, getUnacknowledgedAlerts } from '@/store/useAppStore'
+import { useAppStoreShallow, getUnacknowledgedAlerts } from '@/store/useAppStore'
 import type { Alert } from '@/types'
 
 interface NotificationCenterProps {
@@ -27,7 +27,10 @@ function formatRelativeTime(dateString: string): string {
 }
 
 export function NotificationCenter({ isOpen, onClose, onNavigateToSession }: NotificationCenterProps) {
-    const { alerts, acknowledgeAlert } = useAppStore()
+    const { alerts, acknowledgeAlert } = useAppStoreShallow((state) => ({
+        alerts: state.alerts,
+        acknowledgeAlert: state.acknowledgeAlert,
+    }))
     const panelRef = useRef<HTMLDivElement>(null)
 
     const unacknowledgedAlerts = getUnacknowledgedAlerts(alerts)

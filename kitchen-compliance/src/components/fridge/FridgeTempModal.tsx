@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { X, Thermometer, Check, AlertTriangle, ChevronLeft, ChevronRight, Delete, User } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { getFridges, logFridgeTemp, type Fridge, FRIDGE_LIMITS } from '@/services/fridgeService'
-import { useAppStore } from '@/store/useAppStore'
+import { logFridgeTemp, FRIDGE_LIMITS } from '@/services/fridgeService'
+import { useAppStoreShallow } from '@/store/useAppStore'
 import { useStaff } from '@/hooks/queries/useStaff'
+import { useFridges } from '@/hooks/queries/useFridges'
 import type { StaffMember } from '@/types'
 import { toast } from 'sonner'
 
@@ -26,10 +27,13 @@ export function FridgeTempModal({
   preselectedStaffId,
   voiceStep
 }: FridgeTempModalProps) {
-  const { currentSite, settings } = useAppStore()
+  const { currentSite, subscriptionTier } = useAppStoreShallow((state) => ({
+    currentSite: state.currentSite,
+    subscriptionTier: state.settings.subscriptionTier,
+  }))
   const { data: staffMembers = [] } = useStaff(currentSite?.id)
+  const { data: fridges = [] } = useFridges(currentSite?.id)
 
-  const [fridges, setFridges] = useState<Fridge[]>([])
   const [selectedFridgeIndex, setSelectedFridgeIndex] = useState(0)
   const [temperature, setTemperature] = useState('')
   const [selectedStaff, setSelectedStaff] = useState<StaffMember | null>(null)
@@ -40,16 +44,23 @@ export function FridgeTempModal({
   const [internalStep, setInternalStep] = useState<'temperature' | 'staff'>('temperature')
 
   // Get fridge limit based on subscription
-  const fridgeLimit = FRIDGE_LIMITS[settings.subscriptionTier] || 1
+  const fridgeLimit = FRIDGE_LIMITS[subscriptionTier] || 1
+  const visibleFridges = useMemo(() => fridges.slice(0, fridgeLimit), [fridges, fridgeLimit])
 
   const activeStaff = useMemo(() => staffMembers.filter(s => s.active), [staffMembers])
 
-  // Load fridges on mount
   useEffect(() => {
-    if (isOpen && currentSite?.id) {
-      loadFridges()
+    if (visibleFridges.length === 0) {
+      if (selectedFridgeIndex !== 0) {
+        setSelectedFridgeIndex(0)
+      }
+      return
     }
-  }, [isOpen, currentSite?.id])
+
+    if (selectedFridgeIndex >= visibleFridges.length) {
+      setSelectedFridgeIndex(visibleFridges.length - 1)
+    }
+  }, [selectedFridgeIndex, visibleFridges.length])
 
   // Apply preselected values and voice step
   useEffect(() => {
@@ -79,31 +90,8 @@ export function FridgeTempModal({
     }
   }, [preselectedFridgeIndex, preselectedTemperature, preselectedStaffId, voiceStep, isOpen, staffMembers])
 
-  const loadFridges = async () => {
-    if (!currentSite?.id) return
-    try {
-      const data = await getFridges(currentSite.id)
-      // Limit based on subscription tier
-      setFridges(data.slice(0, fridgeLimit))
-    } catch (err) {
-      console.error('Failed to load fridges:', err)
-      // Use demo fridge
-      setFridges([{
-        id: 'demo-fridge-1',
-        site_id: currentSite.id,
-        name: 'Main Fridge',
-        sort_order: 0,
-        min_temp: 0,
-        max_temp: 5,
-        active: true,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      }])
-    }
-  }
-
   // Current fridge
-  const currentFridge = fridges[selectedFridgeIndex]
+  const currentFridge = visibleFridges[selectedFridgeIndex]
 
   // Temperature validation
   const tempValue = temperature ? parseFloat(temperature) : null
@@ -164,7 +152,7 @@ export function FridgeTempModal({
       toast.success(`${currentFridge.name}: ${tempValue}°C logged`)
 
       // If multiple fridges, go to next one
-      if (fridges.length > 1 && selectedFridgeIndex < fridges.length - 1) {
+      if (visibleFridges.length > 1 && selectedFridgeIndex < visibleFridges.length - 1) {
         setTimeout(() => {
           setSelectedFridgeIndex(prev => prev + 1)
           setTemperature('')
@@ -203,7 +191,7 @@ export function FridgeTempModal({
   }
 
   const goToNextFridge = () => {
-    if (selectedFridgeIndex < fridges.length - 1) {
+    if (selectedFridgeIndex < visibleFridges.length - 1) {
       setSelectedFridgeIndex(prev => prev + 1)
       setTemperature('')
       setInternalStep('temperature')
@@ -244,7 +232,7 @@ export function FridgeTempModal({
         </div>
 
         {/* Fridge Selector (if multiple) */}
-        {fridges.length > 1 && (
+        {visibleFridges.length > 1 && (
           <div className="flex items-center justify-between px-4 py-3 bg-theme-secondary">
             <button
               onClick={goToPrevFridge}
@@ -263,12 +251,12 @@ export function FridgeTempModal({
                 )}
               </p>
               <p className="text-xs text-theme-muted">
-                {selectedFridgeIndex + 1} of {fridges.length}
+                  {selectedFridgeIndex + 1} of {visibleFridges.length}
               </p>
             </div>
             <button
               onClick={goToNextFridge}
-              disabled={selectedFridgeIndex === fridges.length - 1}
+              disabled={selectedFridgeIndex === visibleFridges.length - 1}
               className="p-2 rounded-xl disabled:opacity-30 hover:bg-theme-ghost transition-colors"
             >
               <ChevronRight className="w-5 h-5 text-theme-secondary" />
@@ -277,7 +265,7 @@ export function FridgeTempModal({
         )}
 
         {/* Single fridge header */}
-        {fridges.length === 1 && currentFridge && (
+        {visibleFridges.length === 1 && currentFridge && (
           <div className="px-4 py-3 bg-theme-secondary text-center">
             <p className="text-sm font-semibold text-theme-primary">
               {currentFridge.name}
@@ -492,4 +480,3 @@ export function FridgeTempModal({
     </div>
   )
 }
-

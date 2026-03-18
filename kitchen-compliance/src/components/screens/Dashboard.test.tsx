@@ -13,6 +13,7 @@ const mockSettings = {
 const mockWorkflows: HaccpWorkflow[] = []
 const mockReminders: HaccpReminder[] = []
 const mockStaff: StaffMember[] = []
+let mockActiveStaffId: string | null = null
 const mockMutations = {
   startCooking: { isPending: false, mutateAsync: vi.fn() },
   completeCooking: { isPending: false, mutateAsync: vi.fn() },
@@ -82,22 +83,32 @@ vi.mock('@/components/haccp/HaccpWorkflowDialogs', () => ({
   HaccpStartWorkflowDialog: ({
     open,
     context,
+    defaultStaffId,
   }: {
     open: boolean
     context: { kind: string } | null
-  }) => (open && context ? <div>start-dialog:{context.kind}</div> : null),
+    defaultStaffId?: string | null
+  }) => (open && context ? <div>start-dialog:{context.kind}:{defaultStaffId ?? 'none'}</div> : null),
   HaccpWorkflowActionDialog: () => null,
 }))
 
 vi.mock('@/store/useAppStore', () => ({
   WAKE_WORD_OPTIONS: [{ id: 'luma', label: 'Luma' }],
   getUnacknowledgedAlerts: () => [],
+  useAppStoreShallow: (selector: (state: any) => any) =>
+    selector({
+      currentSite: mockCurrentSite,
+      alerts: [],
+      acknowledgeAlert: vi.fn(),
+      settings: mockSettings,
+      activeStaffId: mockActiveStaffId,
+    }),
   useAppStore: () => ({
     currentSite: mockCurrentSite,
     alerts: [],
     acknowledgeAlert: vi.fn(),
     settings: mockSettings,
-    activeStaffId: null,
+    activeStaffId: mockActiveStaffId,
   }),
 }))
 
@@ -130,8 +141,13 @@ vi.mock('@/hooks/useWakeWord', () => ({
 }))
 
 vi.mock('@/services/fridgeService', () => ({
-  getFridges: vi.fn().mockResolvedValue([]),
   logFridgeTemp: vi.fn(),
+}))
+
+vi.mock('@/hooks/queries/useFridges', () => ({
+  useFridges: () => ({
+    data: [],
+  }),
 }))
 
 vi.mock('@/hooks/queries/useStaff', () => ({
@@ -169,6 +185,7 @@ afterEach(() => {
   mockWorkflows.length = 0
   mockReminders.length = 0
   mockStaff.length = 0
+  mockActiveStaffId = null
   vi.clearAllMocks()
 })
 
@@ -180,15 +197,37 @@ describe('Dashboard', () => {
     })
 
     fireEvent.click(screen.getByRole('button', { name: /start cook workflow/i }))
-    expect(screen.getByText('start-dialog:cooking')).toBeTruthy()
+    expect(await screen.findByText('start-dialog:cooking:none')).toBeTruthy()
 
     fireEvent.click(screen.getByRole('button', { name: /start cool workflow/i }))
-    expect(screen.getByText('start-dialog:cooling')).toBeTruthy()
+    expect(await screen.findByText('start-dialog:cooling:none')).toBeTruthy()
 
     fireEvent.click(screen.getByRole('button', { name: /start reheat workflow/i }))
-    expect(screen.getByText('start-dialog:reheating')).toBeTruthy()
+    expect(await screen.findByText('start-dialog:reheating:none')).toBeTruthy()
 
     fireEvent.click(screen.getByRole('button', { name: /start hold workflow/i }))
-    expect(screen.getByText('start-dialog:hot_hold')).toBeTruthy()
+    expect(await screen.findByText('start-dialog:hot_hold:none')).toBeTruthy()
+  })
+
+  it('falls back to the first real staff member when persisted kiosk state is invalid', async () => {
+    mockActiveStaffId = 'auth-user-1'
+    mockStaff.push({
+      id: 'staff-1',
+      site_id: 'site-1',
+      name: 'Alice',
+      initials: 'A',
+      role: 'staff',
+      active: true,
+      staff_code: '001',
+      created_at: '2026-03-17T08:00:00.000Z',
+    })
+
+    await act(async () => {
+      render(<Dashboard />)
+      await Promise.resolve()
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: /start cook workflow/i }))
+    expect(await screen.findByText('start-dialog:cooking:staff-1')).toBeTruthy()
   })
 })

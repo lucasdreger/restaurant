@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   AlertTriangle,
   BellRing,
@@ -20,16 +20,16 @@ import {
   type StartContext,
   type StartPayload,
 } from '@/components/haccp/HaccpWorkflowDialogs'
-import { useAppStore, WAKE_WORD_OPTIONS } from '@/store/useAppStore'
+import { useAppStoreShallow, WAKE_WORD_OPTIONS } from '@/store/useAppStore'
 import { useAuth } from '@/components/auth/auth-context'
 import { useStaff } from '@/hooks/queries/useStaff'
+import { useFridges } from '@/hooks/queries/useFridges'
 import { useHaccpMutations, useHaccpReminders, useHaccpWorkflows } from '@/hooks/queries/useHaccp'
 import { useHaccpVoiceController } from '@/hooks/useHaccpVoiceController'
 import { useWakeWord, playWakeSound, getPrimaryWakeWordLabel } from '@/hooks/useWakeWord'
 import { parseVoiceCommand } from '@/lib/voiceCommands'
-import { getHotHoldSeverity, shouldShowWorkflowOnBoard } from '@/lib/haccp'
+import { getBoardVisibleWorkflows, getHotHoldSeverity } from '@/lib/haccp'
 import { cn } from '@/lib/utils'
-import { getFridges, type Fridge } from '@/services/fridgeService'
 import { ensurePushSubscription, isPushSupported, requestNotificationPermission } from '@/services/pushService'
 import type { HaccpWorkflow, WorkflowKind, WorkflowState } from '@/types'
 
@@ -132,13 +132,18 @@ function laneSortValue(workflow: HaccpWorkflow) {
 
 export function HaccpDashboard({ onNavigate }: HaccpDashboardProps) {
   const { user } = useAuth()
-  const { currentSite, settings, activeStaffId } = useAppStore()
+  const { currentSite, activeStaffId, wakeWordEnabled, activeWakeWords } = useAppStoreShallow((state) => ({
+    currentSite: state.currentSite,
+    activeStaffId: state.activeStaffId,
+    wakeWordEnabled: state.settings.wakeWordEnabled,
+    activeWakeWords: state.settings.activeWakeWords,
+  }))
   const { data: workflows = [] } = useHaccpWorkflows(currentSite?.id, DASHBOARD_STATES)
   const { data: reminders = [] } = useHaccpReminders(currentSite?.id)
   const { data: staffMembers = [] } = useStaff(currentSite?.id)
+  const { data: fridges = [] } = useFridges(currentSite?.id)
   const mutations = useHaccpMutations(currentSite?.id)
 
-  const [fridges, setFridges] = useState<Fridge[]>([])
   const [selectedStaffId, setSelectedStaffId] = useState<string>('')
   const [startDialog, setStartDialog] = useState<StartContext | null>(null)
   const [actionDialog, setActionDialog] = useState<ActionDialogState>(null)
@@ -153,15 +158,12 @@ export function HaccpDashboard({ onNavigate }: HaccpDashboardProps) {
   const voiceButtonRef = useRef<VoiceButtonHandle>(null)
 
   useEffect(() => {
-    if (!selectedStaffId && staffMembers.length > 0) {
-      setSelectedStaffId(activeStaffId ?? staffMembers[0].id)
-    }
-  }, [activeStaffId, selectedStaffId, staffMembers])
+    if (staffMembers.length === 0) return
+    if (staffMembers.some((staff) => staff.id === selectedStaffId)) return
 
-  useEffect(() => {
-    if (!currentSite?.id) return
-    void getFridges(currentSite.id).then(setFridges).catch(() => setFridges([]))
-  }, [currentSite?.id])
+    const nextStaffId = staffMembers.find((staff) => staff.id === activeStaffId)?.id ?? staffMembers[0].id
+    setSelectedStaffId(nextStaffId)
+  }, [activeStaffId, selectedStaffId, staffMembers])
 
   useEffect(() => {
     const intervalId = window.setInterval(() => {
@@ -190,11 +192,15 @@ export function HaccpDashboard({ onNavigate }: HaccpDashboardProps) {
   const selectedStaff = useMemo(() => {
     return staffMembers.find((staff) => staff.id === selectedStaffId) ?? null
   }, [selectedStaffId, staffMembers])
+  const staffOptions = useMemo(
+    () => staffMembers.map((staff) => ({ id: staff.id, name: staff.name, staff_code: staff.staff_code })),
+    [staffMembers],
+  )
   const currentSiteId = currentSite?.id
   const currentUserId = user?.id
 
   const visibleWorkflows = useMemo(
-    () => workflows.filter((workflow: HaccpWorkflow) => shouldShowWorkflowOnBoard(workflow, clockNow)),
+    () => getBoardVisibleWorkflows(workflows, clockNow),
     [clockNow, workflows],
   )
   const workflowsByKind = useMemo(() => {
@@ -233,8 +239,8 @@ export function HaccpDashboard({ onNavigate }: HaccpDashboardProps) {
   })
 
   const wakeWordLabel = useMemo(
-    () => getPrimaryWakeWordLabel(settings.activeWakeWords?.length ? settings.activeWakeWords : ['luma']),
-    [settings.activeWakeWords],
+    () => getPrimaryWakeWordLabel(activeWakeWords?.length ? activeWakeWords : ['luma']),
+    [activeWakeWords],
   )
 
   const handleWakeWordHeard = useCallback(() => {
@@ -273,10 +279,10 @@ export function HaccpDashboard({ onNavigate }: HaccpDashboardProps) {
 
   useWakeWord({
     enabled:
-      settings.wakeWordEnabled &&
+      wakeWordEnabled &&
       !haccpVoice.conversationMode &&
       (voiceInteraction.state === 'idle' || voiceInteraction.state === 'wake_ready'),
-    wakeWords: settings.activeWakeWords?.length ? settings.activeWakeWords : WAKE_WORD_OPTIONS.map((option) => option.id),
+    wakeWords: activeWakeWords?.length ? activeWakeWords : WAKE_WORD_OPTIONS.map((option) => option.id),
     onWakeWordHeard: handleWakeWordHeard,
     onWakeWordDetected: handleWakeWordDetected,
     onCommandDetected: handleImmediateWakeCommand,
@@ -446,7 +452,7 @@ export function HaccpDashboard({ onNavigate }: HaccpDashboardProps) {
               <div className="flex items-center gap-2 rounded-2xl border border-zinc-200 bg-white/90 px-3 py-2 text-sm shadow-sm dark:border-zinc-800 dark:bg-zinc-950/70">
                 <Mic className="h-4 w-4 text-emerald-500" />
                 <span className="font-medium">Wake word</span>
-                <span className="text-zinc-500 dark:text-zinc-400">{settings.wakeWordEnabled ? wakeWordLabel : 'Disabled'}</span>
+                <span className="text-zinc-500 dark:text-zinc-400">{wakeWordEnabled ? wakeWordLabel : 'Disabled'}</span>
               </div>
             </div>
 
@@ -469,7 +475,7 @@ export function HaccpDashboard({ onNavigate }: HaccpDashboardProps) {
                 size="lg"
                 conversationMode={haccpVoice.conversationMode}
                 quickResponseMode={haccpVoice.conversationMode}
-                wakeWordActive={settings.wakeWordEnabled}
+                wakeWordActive={wakeWordEnabled}
                 wakeWordTriggerToken={wakeWordTriggerToken}
                 wakeWordLabel={wakeWordLabel}
                 onCommand={(command) => {
@@ -610,7 +616,7 @@ export function HaccpDashboard({ onNavigate }: HaccpDashboardProps) {
         open={!!startDialog}
         onOpenChange={(open) => !open && setStartDialog(null)}
         context={startDialog}
-        staffOptions={staffMembers.map((staff) => ({ id: staff.id, name: staff.name, staff_code: staff.staff_code }))}
+        staffOptions={staffOptions}
         defaultStaffId={selectedStaffId || null}
         loading={
           mutations.startCooking.isPending ||
@@ -626,7 +632,7 @@ export function HaccpDashboard({ onNavigate }: HaccpDashboardProps) {
         onOpenChange={(open) => !open && setActionDialog(null)}
         mode={actionDialog?.mode ?? 'complete'}
         workflow={actionDialog?.workflow ?? null}
-        staffOptions={staffMembers.map((staff) => ({ id: staff.id, name: staff.name, staff_code: staff.staff_code }))}
+        staffOptions={staffOptions}
         defaultStaffId={selectedStaffId || null}
         fridges={fridges}
         loading={
@@ -642,7 +648,7 @@ export function HaccpDashboard({ onNavigate }: HaccpDashboardProps) {
   )
 }
 
-function StatCard({
+const StatCard = memo(function StatCard({
   label,
   value,
   tone,
@@ -666,9 +672,9 @@ function StatCard({
       <p className="mt-3 text-3xl font-semibold tracking-tight">{value}</p>
     </div>
   )
-}
+})
 
-function WorkflowCard({
+const WorkflowCard = memo(function WorkflowCard({
   workflow,
   className,
   onAction,
@@ -767,4 +773,4 @@ function WorkflowCard({
       </div>
     </article>
   )
-}
+})

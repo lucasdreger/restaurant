@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react'
+import { memo, useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Thermometer, Flame, Snowflake, Soup, TimerReset } from 'lucide-react'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/Dialog'
 import { Button } from '@/components/ui/Button'
@@ -124,7 +124,71 @@ function defaultTemperatureForAction(workflow: HaccpWorkflow, mode: ActionMode) 
   return '75'
 }
 
-function OperatorQuickSelect({
+const OperatorQuickSelectOption = memo(function OperatorQuickSelectOption({
+  staff,
+  index,
+  isSelected,
+  onSelect,
+}: {
+  staff: StaffOption
+  index: number
+  isSelected: boolean
+  onSelect: (staffId: string) => void
+}) {
+  return (
+    <button
+      type="button"
+      aria-pressed={isSelected}
+      onClick={() => onSelect(staff.id)}
+      className={cn(
+        'min-h-18 rounded-2xl border p-4 text-left transition-all',
+        'focus:outline-none focus:ring-2 focus:ring-[hsl(var(--input-focus)/0.18)]',
+        isSelected
+          ? 'border-sky-500/70 bg-sky-500/10 text-theme-primary shadow-[0_0_0_1px_rgba(14,165,233,0.12),0_16px_36px_rgba(14,165,233,0.18)] dark:border-sky-400/55 dark:bg-sky-500/18'
+          : 'border-theme-primary/35 bg-theme-input text-theme-secondary hover:bg-theme-card hover:border-theme-focus/60',
+      )}
+    >
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-3">
+          <div
+            className={cn(
+              'flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl text-sm font-bold',
+              isSelected
+                ? 'bg-sky-500 text-white shadow-[0_10px_24px_rgba(14,165,233,0.28)]'
+                : 'bg-theme-secondary text-theme-primary',
+            )}
+          >
+            {operatorInitials(staff.name)}
+          </div>
+          <div className="min-w-0">
+            <p className="truncate text-base font-semibold text-theme-primary">{staff.name}</p>
+            <p
+              className={cn(
+                'mt-1 text-xs font-semibold uppercase tracking-[0.18em]',
+                isSelected ? 'text-sky-700 dark:text-sky-100' : 'text-theme-muted',
+              )}
+            >
+              {isSelected ? 'Selected' : 'Tap to select'}
+            </p>
+          </div>
+        </div>
+
+        <span
+          className={cn(
+            'rounded-full border px-2.5 py-1 text-xs font-bold tracking-[0.18em]',
+            isSelected
+              ? 'border-sky-500/40 bg-sky-500/15 text-sky-700 dark:border-sky-400/45 dark:bg-sky-500/20 dark:text-sky-100'
+              : 'border-theme-primary/40 bg-theme-secondary text-theme-secondary',
+          )}
+        >
+          {operatorReference(staff, index)}
+        </span>
+      </div>
+    </button>
+  )
+})
+
+const OperatorQuickSelect = memo(function OperatorQuickSelect({
   staffOptions,
   selectedStaffId,
   onSelect,
@@ -146,64 +210,19 @@ function OperatorQuickSelect({
   return (
     <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
       {sortedStaffOptions.map((staff, index) => {
-        const isSelected = selectedStaffId === staff.id
-
         return (
-          <button
+          <OperatorQuickSelectOption
             key={staff.id}
-            type="button"
-            aria-pressed={isSelected}
-            onClick={() => onSelect(staff.id)}
-            className={cn(
-              'min-h-18 rounded-2xl border p-4 text-left transition-all',
-              'focus:outline-none focus:ring-2 focus:ring-[hsl(var(--input-focus)/0.18)]',
-              isSelected
-                ? 'border-sky-500/70 bg-sky-500/10 text-theme-primary shadow-[0_0_0_1px_rgba(14,165,233,0.12),0_16px_36px_rgba(14,165,233,0.18)] dark:border-sky-400/55 dark:bg-sky-500/18'
-                : 'border-theme-primary/35 bg-theme-input text-theme-secondary hover:bg-theme-card hover:border-theme-focus/60',
-            )}
-          >
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex min-w-0 items-center gap-3">
-                <div
-                  className={cn(
-                    'flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl text-sm font-bold',
-                    isSelected
-                      ? 'bg-sky-500 text-white shadow-[0_10px_24px_rgba(14,165,233,0.28)]'
-                      : 'bg-theme-secondary text-theme-primary',
-                  )}
-                >
-                  {operatorInitials(staff.name)}
-                </div>
-                <div className="min-w-0">
-                  <p className="truncate text-base font-semibold text-theme-primary">{staff.name}</p>
-                  <p
-                    className={cn(
-                      'mt-1 text-xs font-semibold uppercase tracking-[0.18em]',
-                      isSelected ? 'text-sky-700 dark:text-sky-100' : 'text-theme-muted',
-                    )}
-                  >
-                    {isSelected ? 'Selected' : 'Tap to select'}
-                  </p>
-                </div>
-              </div>
-
-              <span
-                className={cn(
-                  'rounded-full border px-2.5 py-1 text-xs font-bold tracking-[0.18em]',
-                  isSelected
-                    ? 'border-sky-500/40 bg-sky-500/15 text-sky-700 dark:border-sky-400/45 dark:bg-sky-500/20 dark:text-sky-100'
-                    : 'border-theme-primary/40 bg-theme-secondary text-theme-secondary',
-                )}
-              >
-                {operatorReference(staff, index)}
-              </span>
-            </div>
-          </button>
+            staff={staff}
+            index={index}
+            isSelected={selectedStaffId === staff.id}
+            onSelect={onSelect}
+          />
         )
       })}
     </div>
   )
-}
+})
 
 function labelForKind(kind: WorkflowKind) {
   switch (kind) {

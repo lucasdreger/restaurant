@@ -35,7 +35,7 @@ export const HACCP_KEYS = {
 } as const
 
 export function invalidateHaccpQueries(queryClient: QueryClient, siteId?: string) {
-  queryClient.invalidateQueries({ queryKey: HACCP_KEYS.all })
+  queryClient.invalidateQueries({ queryKey: HACCP_KEYS.workflows() })
   if (siteId) {
     queryClient.invalidateQueries({ queryKey: HACCP_KEYS.reminders(siteId) })
     queryClient.invalidateQueries({ queryKey: HACCP_KEYS.lifecycles(siteId) })
@@ -51,7 +51,8 @@ export function useHaccpWorkflows(siteId: string | undefined, states: WorkflowSt
       return fetchHaccpWorkflows(siteId, states)
     },
     enabled: !!siteId,
-    refetchInterval: 1000 * 60,
+    // Realtime keeps this fresh in normal operation; use a light fallback poll only.
+    refetchInterval: 1000 * 60 * 5,
   })
 }
 
@@ -63,7 +64,8 @@ export function useHaccpReminders(siteId: string | undefined) {
       return fetchHaccpReminders(siteId)
     },
     enabled: !!siteId,
-    refetchInterval: 1000 * 30,
+    // Reminders are realtime-driven; keep a slower fallback if the socket drops.
+    refetchInterval: 1000 * 60 * 2,
   })
 }
 

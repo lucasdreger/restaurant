@@ -1,6 +1,6 @@
 import { type ReactNode, useState } from 'react'
 import { Sidebar, MobileNav, MobileHeader, MobileMenuDrawer } from './Sidebar'
-import { useAppStore } from '@/store/useAppStore'
+import { useAppStoreShallow } from '@/store/useAppStore'
 
 interface MainLayoutProps {
   children: ReactNode
@@ -24,7 +24,9 @@ export function MainLayout({
   onNavigate,
   fullScreen = false 
 }: MainLayoutProps) {
-  const { currentSite } = useAppStore()
+  const { currentSite } = useAppStoreShallow((state) => ({
+    currentSite: state.currentSite,
+  }))
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
 
   // Full screen mode - no sidebar at all (e.g., for onboarding, landing)
